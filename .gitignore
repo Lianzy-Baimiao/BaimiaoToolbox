@@ -1,0 +1,8 @@
+# 备份/临时文件
+*.bak
+*.tmp
+~$*
+
+# 系统文件
+Thumbs.db
+.DS_Store

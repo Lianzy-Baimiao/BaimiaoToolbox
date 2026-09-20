@@ -1,0 +1,19 @@
+## Interface: 120000, 120001, 120005, 120007, 120100
+## Title: |cff0cd29f白描工具箱|r
+## Title-zhCN: |cff0cd29f白描工具箱|r
+## Notes: A home for 白描's small in-game tools. Each feature is a self-contained module.
+## Notes-zhCN: 白描的各类游戏内小工具合集，每个功能都是独立模块。
+## Author: 白描
+## SavedVariables: BaimiaoToolboxDB
+## SavedVariablesPerCharacter: BaimiaoToolboxDBPC
+## OptionalDeps: LibSharedMedia-3.0
+## Version: 1.2.0
+## IconTexture: Interface\AddOns\BaimiaoToolbox\media\cat_icon.tga
+
+Core.lua
+
+# 各功能模块（新增功能时在这里加一行即可）
+Modules\CoordShout.lua
+Modules\Reminder.lua
+Modules\QuickMount.lua
+Modules\RaidCooldowns.lua
