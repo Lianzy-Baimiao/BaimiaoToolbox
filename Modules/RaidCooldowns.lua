@@ -9,6 +9,8 @@ local ADDON, ns = ...
 --
 -- API 参考自 EllesmereUIQoL（12.x 实测可用）：
 --   战复共享池 = Rebirth(20484) 的充能：C_Spell.GetSpellCharges
+--   注意：共享池只认「充能」。用「不在冷却 = 1 次」那种兜底会让自己不会战复的职业
+--   （武僧等）也读出 1 次 —— 因为 GetSpellCooldown(20484) 对不会这法术的人同样有数据。
 --   嗜血/沙 的法术、疲惫 debuff id 均为“非秘密”，GetPlayerAuraBySpellID 战斗中也能读。
 --------------------------------------------------------------------------------
 
@@ -95,7 +97,7 @@ end
 -- 各职业自带的战复法术（单人/小队时读自己这只）。
 local BREZ_BY_CLASS = {
     DRUID       = 20484,   -- 复生
-    DEATHKNIGHT = 61999,   -- 援救盟友
+    DEATHKNIGHT = 61999,   -- 复活盟友
     WARLOCK     = 20707,   -- 灵魂石
     PALADIN     = 391054,  -- 代祷（惩戒骑等自带战复）
 }
@@ -105,15 +107,25 @@ local function GetOwnBrez()
     return BREZ_BY_CLASS[class]
 end
 
+local function IsKnown(spellID)
+    if not spellID then return false end
+    return (IsSpellKnown and IsSpellKnown(spellID)) or (IsPlayerSpell and IsPlayerSpell(spellID)) or false
+end
+
 -- 读某法术的可用性：优先按“充能”，没有充能体系就退回“冷却”当 1 充能算。
+-- poolOnly = true 只认充能 —— 共享战复池必须这么读，因为「不在冷却就当 1 充能」只对
+-- 自己会的单发战复成立；对不会的法术（武僧去读复生 20484）会读成「不在 CD = 1」，
+-- 于是没有战复的职业也显示「战复：1」。非 poolOnly 时同样会跳过自己没学的法术。
 -- 返回 charges, maxCharges, cdStart, cdDuration；读不到返回 nil。
-local function SpellAvail(spellID)
+local function SpellAvail(spellID, poolOnly)
     if not (C_Spell and spellID) then return nil end
+    if not poolOnly and not IsKnown(spellID) then return nil end
     local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(spellID)
     if ci and ci.maxCharges and ci.maxCharges > 0 then
         return ci.currentCharges, ci.maxCharges, ci.cooldownStartTime, ci.cooldownDuration
     end
-    -- 单发战复（如惩戒骑代祷）没有充能，用冷却判断：不在 CD = 1，在 CD = 0。
+    if poolOnly then return nil end
+    -- 单发战复（如惩戒骑代祷、术士灵魂石）没有充能，用冷却判断：不在 CD = 1，在 CD = 0。
     local cd = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(spellID)
     if cd then
         local onCD = cd.duration and cd.duration > 1.5 and cd.startTime and cd.startTime > 0
@@ -122,29 +134,32 @@ local function SpellAvail(spellID)
     return nil
 end
 
-local function IsKnown(spellID)
-    if not spellID then return false end
-    return (IsSpellKnown and IsSpellKnown(spellID)) or (IsPlayerSpell and IsPlayerSpell(spellID)) or false
-end
-
--- 返回：文字, 颜色。团队 = 共享战复池；单人/小队 = 自己的战复法术。
+-- 返回：文字, 颜色。团队 = 共享战复池；单人/小队 = 自己的战复法术（没有就读队伍共享池）。
 local function GetBrezState()
     local charges, maxc, start, dur
 
     if IsInRaid() then
-        -- 团队里用共享池的代表法术（复生 20484），跨职业通用。
-        charges, maxc, start, dur = SpellAvail(BREZ_SPELL)
+        -- 团队：共享池的代表法术（复生 20484），跨职业通用；只认充能。
+        charges, maxc, start, dur = SpellAvail(BREZ_SPELL, true)
     else
-        -- 单人/小队：读自己职业的战复法术（惩戒骑=代祷，不在 CD 就是 1）。
+        -- 单人/小队：先看自己职业的战复（惩戒骑=代祷，不在 CD 就是 1）。
         local own = GetOwnBrez()
         if own and IsKnown(own) then
             charges, maxc, start, dur = SpellAvail(own)
         end
-        -- 兜底：小队副本里也可能有共享池
-        if not charges then charges, maxc, start, dur = SpellAvail(BREZ_SPELL) end
+        -- 自己不会：小队副本里队友的战复走共享池；读不到充能就是「没有」，
+        -- 绝不再回退到冷却判断（那正是武僧被误报「战复 1」的原因）。
+        if not charges then
+            charges, maxc, start, dur = SpellAvail(BREZ_SPELL, true)
+        end
     end
 
     if not charges then
+        -- 组着队却读不到共享池（例如野外小队）：显示「?」而不是「无」，
+        -- 避免把"读不到"说成"没有战复"（模块里其它读不到的值也用「--/?」这种写法）。
+        if IsInGroup() and not IsInRaid() then
+            return "战复：?", { 0.75, 0.75, 0.75 }
+        end
         return "战复：无", { 0.75, 0.75, 0.75 }
     end
 
@@ -482,6 +497,7 @@ local function BuildOptions(panel, m, L)
     L:Button(120, "停止", function() StopLustMusic() end, true, tryBtn)
 
     L:Text("提示：团队里读共享战复池；单人/小队里读你自己职业的战复（惩戒骑=代祷，不在CD就是1）。" ..
+        "自己职业没有战复时显示「战复：无」，不会误报 1 次。" ..
         "嗜血判定已内置常见变体（嗜血/英勇/时间扭曲/亲龙之赐/原始狂暴）。" ..
         "锁定后可用 Alt+右键 打开本设置。", true)
 end

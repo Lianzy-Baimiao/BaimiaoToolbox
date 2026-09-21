@@ -3,9 +3,9 @@ local ADDON, ns = ...
 --------------------------------------------------------------------------------
 -- 模块：光环/宠物提示器
 -- 屏幕中间大字提醒：
---   · 术士 / 猎人 没有宠物
+--   · 术士 / 猎人 没有宠物（射击专精不带宠物是正常玩法，不提醒）
 --   · 骑士 没有开任何光环
--- 触发文本、字号、颜色、位置均可编辑；光环判定的法术 id 可自定义。
+-- 触发文本、字号、颜色、位置均可编辑；光环 / “独来独往”的法术 id 可自定义。
 --------------------------------------------------------------------------------
 
 local MODULE_ID = "reminder"
@@ -13,6 +13,11 @@ local MODULE_ID = "reminder"
 -- 骑士光环默认法术 id（不同版本可能变，设置里可改）。
 -- 465 专注/虔诚, 32223 十字军, 183435 报应, 317920 专注……按需增减。
 local DEFAULT_PALADIN_AURAS = "465,32223,183435,317920"
+
+-- “独来独往”（Lone Wolf）的法术 id（逗号分隔，设置里可改）：
+-- 155228 = 2016–11.1 那版（11.1.0 已被移除）；164273 / 295390 = 当前 DB2 SpellName(zhCN)
+-- 里名为“独来独往”的条目。暴雪改 id 是常态，所以做成设置项而不是写死的常量。
+local DEFAULT_LONE_WOLF = "155228,164273,295390"
 
 local defaults = {
     fontSize = 40,
@@ -25,6 +30,8 @@ local defaults = {
         pet = {
             enabled = true,
             text = "|cffff2020没有宠物！|r",
+            skipMarksmanship = true,          -- 射击专精：宠物是可选项，不带不提醒
+            loneWolfSpells = DEFAULT_LONE_WOLF,
         },
         paladinAura = {
             enabled = true,
@@ -45,12 +52,53 @@ local playerClass  -- 登录时缓存，本会话不变
 -- 判定
 --------------------------------------------------------------------------------
 
--- 射击猎“独来独往”（Lone Wolf, 155228）：点了它不带宠物是正常玩法，不提醒。
-local LONE_WOLF_SPELL = 155228
+-- 把 "465,32223" 解析成数字列表。
+local function ParseSpells(str)
+    local ids = {}
+    for token in tostring(str or ""):gmatch("%d+") do
+        ids[#ids + 1] = tonumber(token)
+    end
+    return ids
+end
+
+-- 当前专精的 specID（猎人：253 兽王 / 254 射击 / 255 生存）。取不到返回 nil。
+local function CurrentSpecID()
+    local idx
+    if C_SpecializationInfo and C_SpecializationInfo.GetSpecialization then
+        idx = C_SpecializationInfo.GetSpecialization()
+    elseif GetSpecialization then
+        idx = GetSpecialization()
+    end
+    if not idx then return nil end
+
+    local info
+    if C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo then
+        info = C_SpecializationInfo.GetSpecializationInfo(idx)
+    elseif GetSpecializationInfo then
+        info = GetSpecializationInfo(idx)
+    end
+    if type(info) == "table" then return info.specID end
+    return info  -- 传统多返回值：第一个就是 specID
+end
+
+-- 猎人专精 id：253 兽王、254 射击、255 生存。
+-- 射击从 7.0.3 起就是“不带宠物作战”的设计（官方补丁说明原文：Marksmanship hunters
+-- no longer fight with a pet），宠物只是可选项，不带它不算“忘带”。
+-- 旧版本靠“独来独往”天赋判断，但那个天赋在 11.1.0 被移除、写死的 155228 永远匹配不到，
+-- 于是射击猎一直被误报——所以这里直接按专精豁免，天赋 id 只当额外保险。
+local SPEC_MARKSMANSHIP = 254
+
+-- “独来独往”（Lone Wolf）的法术 id（逗号分隔，可在设置里改）：
+-- 155228 = 2016–11.1 那版（11.1.0 已移除）；164273 / 295390 = 当前 DB2 SpellName(zhCN)
+-- （DEFAULT_LONE_WOLF 定义在文件开头：defaults 表要用到它）
+
+-- 是否拥有“独来独往”（不带宠物是正常玩法）。
 local function HasLoneWolf()
     if playerClass ~= "HUNTER" then return false end
-    if IsPlayerSpell and IsPlayerSpell(LONE_WOLF_SPELL) then return true end
-    if IsSpellKnown and IsSpellKnown(LONE_WOLF_SPELL) then return true end
+    for _, id in ipairs(ParseSpells(DB().rules.pet.loneWolfSpells or DEFAULT_LONE_WOLF)) do
+        if IsPlayerSpell and IsPlayerSpell(id) then return true end
+        if IsSpellKnown and IsSpellKnown(id) then return true end
+    end
     return false
 end
 
@@ -59,18 +107,14 @@ local function MissingPet()
     if playerClass ~= "WARLOCK" and playerClass ~= "HUNTER" then return false end
     -- 载具中不提醒（此时没宠物很正常）。
     if UnitInVehicle and UnitInVehicle("player") then return false end
-    -- 射击猎点了孤狼：不带宠物是玩法，不是忘带。
-    if HasLoneWolf() then return false end
-    return not UnitExists("pet")
-end
-
--- 把 "465,32223" 解析成数字列表。
-local function ParseSpells(str)
-    local ids = {}
-    for token in tostring(str or ""):gmatch("%d+") do
-        ids[#ids + 1] = tonumber(token)
+    local rule = DB().rules.pet
+    if playerClass == "HUNTER" then
+        -- 射击专精：宠物是可选项，不带不提醒（可在设置里关掉这条豁免）。
+        if rule.skipMarksmanship and CurrentSpecID() == SPEC_MARKSMANSHIP then return false end
+        -- 其它专精点了“独来独往”：同样算正常玩法，不是忘带。
+        if HasLoneWolf() then return false end
     end
-    return ids
+    return not UnitExists("pet")
 end
 
 -- 扫描玩家身上所有增益，返回 spellId 集合 + 是否成功。
@@ -322,7 +366,7 @@ end
 
 local function BuildOptions(panel, m, L)
     L:Title("光环/宠物提示器")
-    L:Text("屏幕中间大字提醒。术士/猎人没宠物、骑士没开光环时弹出。", false)
+    L:Text("屏幕中间大字提醒。术士/猎人没宠物、骑士没开光环时弹出（射击专精不带宠物属正常，已豁免）。", false)
 
     L:Section("外观")
     L:Slider("BaimiaoReminderFontSlider", "字号", 16, 72, 1,
@@ -347,6 +391,13 @@ local function BuildOptions(panel, m, L)
     L:Box(460, 26, false,
         function() return DB().rules.pet.text end,
         function(v) DB().rules.pet.text = v end, Refresh)
+    L:Check("射击猎（射击专精）不带宠物不提醒（宠物是可选项）",
+        function() return DB().rules.pet.skipMarksmanship end,
+        function(v) DB().rules.pet.skipMarksmanship = v end, Refresh)
+    L:Text("算作“独来独往”的法术 id（逗号分隔，随版本可改）:", true)
+    L:Box(460, 26, false,
+        function() return DB().rules.pet.loneWolfSpells or DEFAULT_LONE_WOLF end,
+        function(v) DB().rules.pet.loneWolfSpells = v end, Refresh)
 
     L:Check("骑士 没开光环时提醒",
         function() return DB().rules.paladinAura.enabled end,
@@ -422,7 +473,7 @@ end
 ns.RegisterModule({
     id = MODULE_ID,
     name = "光环/宠物提示器",
-    desc = "屏幕中间大字提醒：术士/猎人没宠物、骑士没开光环。文字/颜色/字号可编辑。",
+    desc = "屏幕中间大字提醒：术士/猎人没宠物（射击专精除外）、骑士没开光环。文字/颜色/字号可编辑。",
     defaults = defaults,
     OnEnable = function()
         playerClass = select(2, UnitClass("player"))

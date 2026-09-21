@@ -322,7 +322,15 @@ local function SkinTextButton(b)
     SkinCardFrame(b, 0.55)
     SkinHoverBorder(b)
     local fs = b.GetFontString and b:GetFontString()
-    if fs then fs:SetTextColor(0.9, 0.95, 0.93) end
+    if fs then
+        -- 去掉字体阴影与字体标记（OUTLINE / THICK 之类）：我们的底是深色卡片，
+        -- 暴雪默认的阴影/描边在上面只会让字看着发虚、像"重影"。
+        local path, size = fs:GetFont()
+        if path then fs:SetFont(path, size, "") end
+        fs:SetShadowOffset(0, 0)
+        if fs.SetSpacing then fs:SetSpacing(0) end
+        fs:SetTextColor(0.9, 0.95, 0.93)
+    end
     b:SetScript("OnMouseDown", function(self) self:SetBackdropColor(0.10, 0.16, 0.13, 0.9) end)
     b:SetScript("OnMouseUp", function(self) self:SetBackdropColor(0.06, 0.07, 0.07, 0.55) end)
     b:HookScript("OnEnter", function(self) self:SetBackdropColor(0.08, 0.12, 0.10, 0.85) end)
@@ -424,9 +432,18 @@ function ns.UI.NewLayout(panel)
         fs:SetWidth((self.panel:GetWidth() or 600) - self.indent - pad)
         fs:SetWordWrap(true)
         fs:SetText(text)
-        -- 取实际渲染高度（含折行），并给个按换行符估算的下限兜底。
+        -- 高度估算：取实际渲染高度（含折行），并给个按换行符估算的下限兜底。
+        -- 但构建设置页时面板还没布局好，GetStringHeight() 会给偏小的值（折行被当成一行），
+        -- 于是长说明会压住下面第一个控件。所以再按「行宽 / 字号」粗算一次折行数（按最宽的
+        -- 中文字估：1 字 = 3 字节），取较大值 —— 宁可多留点白，也不压住下一个控件。
+        local wrapW = math.max((self.panel:GetWidth() or 600) - self.indent - pad, 80)
+        local fontH = small and 10 or 12
+        local bytesPerLine = math.max(math.floor(wrapW / fontH) * 3, 30)
+        local wrapLines = math.max(math.ceil(#text / bytesPerLine), 1)
         local nl = select(2, text:gsub("\n", "\n")) + 1
-        local h = math.max(fs:GetStringHeight() + 6, 16 * nl + 8)
+        -- 行距：中文默认行距很紧，相邻两行会"贴着"，看着像叠字 —— 每行加 2px 呼吸空间。
+        if fs.SetSpacing then fs:SetSpacing(2) end
+        local h = math.max(fs:GetStringHeight() + 6, (16 + 2) * math.max(nl, wrapLines) + 8)
         self:step(h)
         return fs
     end
@@ -480,6 +497,38 @@ function ns.UI.NewLayout(panel)
             eb:SetMultiLine(true)
             eb:SetMaxLetters(2048)
             scroll:SetScrollChild(eb)
+
+            -- 滚动条：暴雪模板自带一条带金色圆钮的滚动条，和这套扁平卡片不搭。
+            -- 之前只藏了圆箭头、结果还留着（模板结构一变就失效），现在改成
+            -- 「滚动框里除了 EditBox 以外一律藏掉」，不管它是 Slider、Button 还是别的。
+            for _, child in ipairs({ scroll:GetChildren() }) do
+                if child ~= eb then child:Hide() end
+            end
+            -- 框里也可能挂了别的滚动控件/小按钮，一并藏掉（只藏滚动/按钮类，不动 EditBox）
+            for _, child in ipairs({ box:GetChildren() }) do
+                if child ~= eb and (child:IsObjectType("Slider") or child:IsObjectType("Button")) then
+                    child:Hide()
+                end
+            end
+            -- 没了滚动条就用滚轮滚（EditBox 默认不吃滚轮）
+            local function wheelScroll(_, delta)
+                local cur = scroll.GetVerticalScroll and scroll:GetVerticalScroll() or 0
+                local maxv = scroll.GetVerticalScrollRange and scroll:GetVerticalScrollRange() or 0
+                local target = cur - (delta or 0) * 26
+                if target < 0 then target = 0 elseif target > maxv then target = maxv end
+                if scroll.SetVerticalScroll then scroll:SetVerticalScroll(target) end
+            end
+            scroll:EnableMouseWheel(true)
+            scroll:SetScript("OnMouseWheel", wheelScroll)
+            eb:EnableMouseWheel(true)
+            eb:SetScript("OnMouseWheel", wheelScroll)
+            -- 多行 EditBox 的中文行距也太紧，加一点呼吸空间
+            if eb.SetSpacing then eb:SetSpacing(2) end
+            -- 内容刷新后把滚动位置拉回顶部：EditBox 会把光标放末尾、连带滚到底，
+            -- 于是第一行经常被截成半行，压在下一行上看着像"两行字叠在一起"。
+            box._snapTop = function()
+                if scroll.SetVerticalScroll then scroll:SetVerticalScroll(0) end
+            end
         else
             eb = CreateFrame("EditBox", nil, box)
             eb:SetPoint("TOPLEFT", 8, -4)
@@ -582,10 +631,13 @@ function ns.UI.NewLayout(panel)
         box.edit = eb
         self.syncers[#self.syncers + 1] = function()
             local v = getter() or ""
+            local changed = (v ~= box._lastValue)
+            box._lastValue = v
             if not box._editing then eb:SetText(v) end
             valueFs:SetText(v)
             dirty = false
             flash:SetText("")
+            if changed and box._snapTop then box._snapTop() end   -- 换过内容就滚回顶部
         end
         valueFs:SetText(getter() or "")
         self:step(h + 8)

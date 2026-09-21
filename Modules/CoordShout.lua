@@ -96,8 +96,12 @@ local HARM_ORDER = { 5, 8, 10, 20, 25, 30, 35, 40 }
 local function GetTargetRange(unit)
     local lib = GetRangeLib()
     if lib then
-        local minR, maxR = lib:GetRange(unit, true)
-        return minR, maxR
+        -- 库的检查器在 12.x 可能撞上秘密值而报错：出错就退回下面的内置兜底，
+        -- 不让 0.1s 一次的刷新跟着炸。
+        local ok, minR, maxR = pcall(lib.GetRange, lib, unit, true)
+        if ok and (type(minR) == "number" or type(maxR) == "number") then
+            return minR, maxR
+        end
     end
 
     -- 兜底：找到“在射程内”的最小档，即为上界；紧邻的更小档为下界。
@@ -108,14 +112,16 @@ local function GetTargetRange(unit)
         if item then
             local inRange = C_Item.IsItemInRange(item, unit)
             if inRange == true then
-                return prev, yards
+                -- prev 还是 0 说明更近的档都没测出来（物品失效）：只给上界，
+                -- 让 RangeString 显示成 "<40码"，比 "0-40码" 诚实也好读。
+                return (prev > 0) and prev or nil, yards
             elseif inRange == false then
                 prev = yards
             end
             -- inRange == nil：物品无效或不可用，跳过这一档
         end
     end
-    return prev, nil  -- 比最远档还远
+    return (prev > 0) and prev or nil, nil  -- 比最远档还远
 end
 
 -- 组织成显示/喊话用的字符串，如 "15-20码" / ">40码" / "0-100码"。
@@ -183,9 +189,15 @@ local function ForceDirty()
 end
 
 -- 目标变化事件：置脏标记，下次刷新就会重建（不读 guid，规避秘密值）。
+-- 注册/注销跟着模块总开关走，关掉后不再白收事件。
 local targetEv = CreateFrame("Frame")
-targetEv:RegisterEvent("PLAYER_TARGET_CHANGED")
 targetEv:SetScript("OnEvent", function() targetDirty = true end)
+local function SetupTargetEvent()
+    targetEv:RegisterEvent("PLAYER_TARGET_CHANGED")
+end
+local function TeardownTargetEvent()
+    targetEv:UnregisterAllEvents()
+end
 
 -- 目标血量：12.x 里敌对目标的 UnitHealth 是“秘密值”，比较/运算/发送都会报错。
 -- 用 pcall 包住，能算就算（友方/自己等非秘密值），算不出就整段留空。
@@ -233,7 +245,9 @@ local function BuildContext()
     if UnitExists("target") then
         local mult = DB().announce.hpMultiplier or 100
         local hp, hpmax, hppct = SafeTargetHP(mult)
-        ctx.target = UnitName("target") or ""
+        -- 12.x 里敌对目标的 UnitName 也可能是“秘密值”，直接拼进字符串会报错：读不到就留空。
+        local okName, tname = pcall(UnitName, "target")
+        ctx.target = (okName and tname) or ""
         ctx.hp, ctx.hpmax, ctx.hppct = hp, hpmax, hppct
         -- {hpbracket}：血量能读到才拼成 [x/y]，读不到（秘密值）自动省略。
         ctx.hpbracket = (hp ~= "" and hpmax ~= "") and ("[" .. hp .. "/" .. hpmax .. "]") or ""
@@ -276,10 +290,13 @@ local function Announce()
     local ctx, map, px, py = BuildContext()
 
     if a.setWaypoint and map and px and py then
-        C_Map.ClearUserWaypoint()
-        C_Map.SetUserWaypoint({ uiMapID = map, position = { x = px, y = py } })
+        -- 路点在部分地图/副本里会失败（也可能被别的插件影响）。失败不能连累喊话，
+        -- 所以两条都 pcall：落点不成功只是 {waypoint} 变空，消息照发。
+        pcall(C_Map.ClearUserWaypoint)
+        pcall(C_Map.SetUserWaypoint, { uiMapID = map, position = { x = px, y = py } })
     end
-    ctx.waypoint = (C_Map.GetUserWaypointHyperlink and C_Map.GetUserWaypointHyperlink()) or ""
+    local okLink, link = pcall(C_Map.GetUserWaypointHyperlink)
+    ctx.waypoint = (okLink and link) or ""
 
     local hasTarget = UnitExists("target")
     local msg = FormatTemplate(hasTarget and a.templateTarget or a.templateNoTarget, ctx)
@@ -287,7 +304,10 @@ local function Announce()
         ns.Print("坐标喊话：文本为空，检查一下模板。")
         return
     end
-    SendChatMessage(msg, ResolveChannel())
+    local okSend, err = pcall(SendChatMessage, msg, ResolveChannel())
+    if not okSend then
+        ns.Print("坐标喊话：发送失败（" .. tostring(err) .. "），检查一下喊话频道设置。")
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -297,6 +317,7 @@ end
 
 local button
 local displayActive = false   -- 0.1s 刷新开关；模块总开关关闭时停掉避免空转
+local refreshWarned = false   -- 刷新里意外出错只提示一次，别把 BugSack 刷爆
 
 -- 字体：按设置套用大小与轮廓。
 local function ApplyLook()
@@ -385,7 +406,16 @@ local function CreateButton()
     button:SetScript("OnUpdate", function(_, dt)
         if not displayActive then return end
         elapsed = elapsed + dt
-        if elapsed >= 0.1 then elapsed = 0 UpdateDisplay() end
+        if elapsed >= 0.1 then
+            elapsed = 0
+            -- 0.1s 刷一次：任何意外报错都会被放大成每秒 10 条 BugSack，所以兜一层 pcall，
+            -- 只在首次出错时提示一句（不静默吞掉问题，也不刷屏）。
+            local ok, err = pcall(UpdateDisplay)
+            if not ok and not refreshWarned then
+                refreshWarned = true
+                ns.Print("坐标喊话：刷新出错（已继续运行）：" .. tostring(err))
+            end
+        end
     end)
 
     ApplyLook()
@@ -519,15 +549,20 @@ ns.RegisterModule({
     OnEnable = function()
         CreateButton()
         displayActive = true
+        SetupTargetEvent()
+        ForceDirty()            -- 重开时强制重排一次，避免沿用旧缓存
         UpdateDisplay()
         SetupSlash()
     end,
     OnDisable = function()
         displayActive = false   -- 停 0.1s 刷新，关掉总开关后不再空转
+        TeardownTargetEvent()   -- 同时也摘掉目标变化监听
         if button then button:Hide() end
     end,
     OnToggle = function(_, on)
         displayActive = on and true or false
+        -- 重新启用时 Core 只调 OnToggle（不调 OnEnable），事件要在这里补回来。
+        if on then SetupTargetEvent() else TeardownTargetEvent() end
         Refresh()  -- 总开关关掉时 UpdateDisplay 会隐藏按钮
     end,
     BuildOptions = BuildOptions,
