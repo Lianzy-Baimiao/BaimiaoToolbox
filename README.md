@@ -91,11 +91,22 @@
 
 ## 安装
 
-1. 下载最新 Release 中的 `BaimiaoToolbox-x.x.x.zip` 并解压；
-2. 把解出的 `BaimiaoToolbox` 文件夹放到 `World of Warcraft\_retail_\Interface\AddOns\` 下；
-3. 重启游戏或 `/reload`。
+1. 打开 [最新 Release](https://github.com/Lianzy-Baimiao/BaimiaoToolbox/releases/latest)，下载 **附件** `BaimiaoToolbox-X.Y.Z.zip`（当前版本是 `BaimiaoToolbox-1.3.0.zip`）。
 
-也可以 `git clone` 本仓库后把 `BaimiaoToolbox` 文件夹整个拷入 AddOns 目录。
+   > ⚠️ 别下页面上的 **Source code (zip)**：那是源码包，解出来一级目录带版本号（`BaimiaoToolbox-1.3.0\`），游戏不认这个目录名，装了也不会加载。
+
+2. 解压后得到 `BaimiaoToolbox` 文件夹（**目录名不要改**，改了游戏也认不到），整个放进 `World of Warcraft\_retail_\Interface\AddOns\` 下：
+
+   ```text
+   World of Warcraft\_retail_\Interface\AddOns\BaimiaoToolbox\BaimiaoToolbox.toc
+   ```
+
+3. 游戏里 `/reload` 或重启客户端；**设置 → 插件** 里出现「白描工具箱」就装好了。
+
+   > 命名说明：版本名 / 标签 / 附件名统一用英文 —— Release 名称 `BaimiaoToolbox vX.Y.Z`、tag `vX.Y.Z`、
+   附件 `BaimiaoToolbox-X.Y.Z.zip`、插件目录 `BaimiaoToolbox`；只有**游戏内显示名**是中文「白描工具箱」。
+
+也可以 `git clone` 本仓库，把 `插件\BaimiaoToolbox` 整个文件夹（不含 `.git`）拷进 AddOns 目录。
 
 ## 使用
 
