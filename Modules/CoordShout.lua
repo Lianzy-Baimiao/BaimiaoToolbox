@@ -160,28 +160,32 @@ local function GetSpeedPercent()
 end
 
 -- 粗略判断“显示内容可能变了”，避免每 0.1s 重建字符串。
--- 坐标以 0.1 为粒度缓存；目标按“有无 + guid”缓存；移速按整数百分比缓存。
+-- 坐标以 0.1 为粒度缓存；移速按整数百分比缓存。
+-- 目标：12.x 里 UnitGUID("target") 是“秘密值”，比较会 taint 报错，所以不缓存 guid，
+-- 改用 PLAYER_TARGET_CHANGED 事件置 targetDirty 标记来触发刷新。
 local lastX, lastY = -1, -1
 local lastShownPct = -1
-local lastTargetGUID, lastHasTarget = nil, false
+local targetDirty = false
 
 local function DisplayDirty()
     local _, px, py = GetPlayerPos()
     local x10 = px and math.floor(px * 1000 + 0.5) or -1
     local y10 = py and math.floor(py * 1000 + 0.5) or -1
-    local hasT = UnitExists("target") and true or false
-    local tguid = hasT and UnitGUID("target") or nil
-    local dirty =
-        x10 ~= lastX or y10 ~= lastY
-        or hasT ~= lastHasTarget or tguid ~= lastTargetGUID
-    lastX, lastY, lastHasTarget, lastTargetGUID = x10, y10, hasT, tguid
+    local dirty = x10 ~= lastX or y10 ~= lastY or targetDirty
+    lastX, lastY = x10, y10
+    targetDirty = false
     return dirty
 end
 
 local function ForceDirty()
     lastX, lastY, lastShownPct = -1, -1, -1
-    lastHasTarget, lastTargetGUID = false, nil
+    targetDirty = true
 end
+
+-- 目标变化事件：置脏标记，下次刷新就会重建（不读 guid，规避秘密值）。
+local targetEv = CreateFrame("Frame")
+targetEv:RegisterEvent("PLAYER_TARGET_CHANGED")
+targetEv:SetScript("OnEvent", function() targetDirty = true end)
 
 -- 目标血量：12.x 里敌对目标的 UnitHealth 是“秘密值”，比较/运算/发送都会报错。
 -- 用 pcall 包住，能算就算（友方/自己等非秘密值），算不出就整段留空。

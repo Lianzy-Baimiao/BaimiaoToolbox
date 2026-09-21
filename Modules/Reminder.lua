@@ -99,33 +99,35 @@ end
 
 -- 骑士当前是否没有开任何配置里的光环。
 --
--- 关键坑：12.x 在【战斗中】会把光环数据对被 taint 的插件隐藏，
--- GetPlayerAuraBySpellID 这时【不报错、直接返回 nil】（当成“没这个光环”），
--- 于是战斗中明明开着光环也会被误判成“没开”。pcall 挡不住（没抛错）。
+-- 关键坑（12.x）：战斗中光环会被从枚举结果里【剔除】——枚举本身不报错(ok=true)，
+-- 只是那条光环“隐身”了。所以战斗中现读会把开着的光环误判成“没开”，
+-- 脱战正常、一开打就误报，正是这个原因。
 --
--- 解决：只在【脱战】时真正读取并缓存结果；战斗中直接沿用脱战时缓存的判断，
--- 不再重新读（因为读了也不可信）。
-local lastMissingAura = false  -- 上次脱战时的可靠判断
+-- 解决：战斗中【不重新判断】，沿用最近一次“脱战且成功读到”的可靠结果。
+-- 缓存只在【脱战 + 枚举可信】时写入，绝不从战斗中的不可信读取写入
+-- （之前卡死就是因为拿不可信读取写了缓存）。初值 false，未知时不提醒。
+local lastReliableMissing = false
 
 local function MissingPaladinAura()
     if playerClass ~= "PALADIN" then return false end
     local ids = ParseSpells(DB().rules.paladinAura.spells)
     if #ids == 0 then return false end
-    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return false end
 
-    -- 战斗中不信任读取，沿用脱战缓存。
-    if InCombatLockdown() or UnitAffectingCombat("player") then
-        return lastMissingAura
+    -- 读不可信的窗口：战斗中，或大秘境进行中（钥石一开始整局光环都对插件隐身）。
+    -- 这些情况下沿用最近一次可靠判断，不重新读。
+    local inChallenge = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+        and C_ChallengeMode.IsChallengeModeActive()
+    if InCombatLockdown() or UnitAffectingCombat("player") or inChallenge then
+        return lastReliableMissing
     end
+
+    local buffs, ok = ScanPlayerBuffs()
+    if not ok then return lastReliableMissing end  -- 脱战但仍读不到：沿用上次
 
     for _, id in ipairs(ids) do
-        local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-        if ok and aura then
-            lastMissingAura = false
-            return false  -- 开着其中一个
-        end
+        if buffs[id] then lastReliableMissing = false; return false end
     end
-    lastMissingAura = true
+    lastReliableMissing = true
     return true
 end
 
