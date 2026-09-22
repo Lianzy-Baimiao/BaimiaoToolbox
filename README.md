@@ -91,9 +91,9 @@
 
 ## 安装
 
-1. 打开 [最新 Release](https://github.com/Lianzy-Baimiao/BaimiaoToolbox/releases/latest)，下载 **附件** `BaimiaoToolbox-X.Y.Z.zip`（当前版本是 `BaimiaoToolbox-1.3.0.zip`）。
+1. 打开 [最新 Release](https://github.com/Lianzy-Baimiao/BaimiaoToolbox/releases/latest)，下载 **附件** `BaimiaoToolbox-X.Y.Z.zip`（当前版本是 `BaimiaoToolbox-1.3.1.zip`）。
 
-   > ⚠️ 别下页面上的 **Source code (zip)**：那是源码包，解出来一级目录带版本号（`BaimiaoToolbox-1.3.0\`），游戏不认这个目录名，装了也不会加载。
+   > ⚠️ 别下页面上的 **Source code (zip)**：那是源码包，解出来一级目录带版本号（`BaimiaoToolbox-1.3.1\`），游戏不认这个目录名，装了也不会加载。
 
 2. 解压后得到 `BaimiaoToolbox` 文件夹（**目录名不要改**，改了游戏也认不到），整个放进 `World of Warcraft\_retail_\Interface\AddOns\` 下：
 
