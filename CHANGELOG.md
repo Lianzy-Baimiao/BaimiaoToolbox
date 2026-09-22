@@ -2,6 +2,20 @@
 
 本文件记录白描工具箱的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.3.1] - 2026-09-22
+
+### 修复
+- 快捷按钮：扩展按钮在副本 / 大秘境里报错
+  `bad argument #1 to 'SetCooldown' (… Secret values are only allowed during untainted execution)`
+  —— 12.x 在受限内容里会把冷却值变成“秘密值”，插件不能再把 start / duration 直接喂给
+  `SetCooldown`。现在改成分路：法术优先走 `C_Spell.GetSpellCooldownDuration` 返回的
+  DurationObject（由引擎自己解析，插件不碰数值），对象通道不可用时退回数值通道、且先判
+  `issecretvalue` 再比较；物品 / 玩具没有对象通道，秘密环境下宁可不画冷却圈也不报错。
+  顺带用 `isActive`（NeverSecret）当闸门，不在冷却时直接清圈，不再无谓重画。
+- 快捷按钮：按**名称**填背包物品（`物品:xxx`）永远识别失败 —— 12.x 的容器函数在
+  `C_Container` 命名空间，代码却写在 `C_Item` 上，恒为 nil。现在按 `C_Container` → 全局函数
+  依次探测。
+
 ## [1.3.0] - 2026-09-22
 
 ### 新增

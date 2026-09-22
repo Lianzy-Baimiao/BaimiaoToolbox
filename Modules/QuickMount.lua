@@ -339,15 +339,19 @@ local function FindSpellByName(name)
     end
 end
 
--- 名称 -> 背包物品ID
+-- 名称 -> 背包物品ID。
+-- 12.x 里容器相关函数在 C_Container 命名空间（C_Item 上没有），老的全局函数也已移除，
+-- 所以按 C_Container → 全局 依次探测，拿不到就返回 nil（设置里会显示“未识别”）。
 local function FindBagItemByName(name)
-    if not (C_Item and C_Item.GetContainerItemInfo) then return nil end
+    local getInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
+    local getSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+    if not (getInfo and getSlots) then return nil end
     for bag = 0, 4 do
-        local slots = C_Item.GetContainerNumSlots and C_Item.GetContainerNumSlots(bag) or 0
+        local slots = getSlots(bag) or 0
         for slot = 1, slots do
-            local info = C_Item.GetContainerItemInfo(bag, slot)
+            local info = getInfo(bag, slot)
             if info and info.itemID then
-                local n = C_Item.GetItemNameByID and C_Item.GetItemNameByID(info.itemID)
+                local n = C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(info.itemID)
                 if n == name then return info.itemID end
             end
         end
@@ -568,17 +572,74 @@ end
 -- 12.x 起部分 API 会返回 secret value（读取/算术会抛错），跨版本用存在性探测兜底。
 local issecretvalue = issecretvalue or function() return false end
 
--- 读取一个扩展条目的冷却（startTime, duration，均为秒；没有返回 nil）。
+-- 复制一个条目的冷却。12.x 在副本/大秘境等受限场合会把冷却值变成“秘密值”：
+-- plugin 读数会被拒，直接 SetCooldown(start, dur) 也会抛
+-- “Secret values are only allowed during untainted execution”。
+--
+-- 所以这里的原则是【绝不把秘密值交给 SetCooldown】：
+--   法术 —— 优先走 DurationObject 通道（GetSpellCooldownDuration 返回的对象
+--           由引擎自己解析，插件全程不碰数值），Decursive / EllesmereUI 同款；
+--           对象 API 不可用时退回数值通道，但先判秘密再比较。
+--   物品/玩具 —— 没有稳定的对象 API；若引擎将来提供就优先用，否则只有非秘密
+--           环境才画，秘密环境下宁可不显示，也不报错。
 local GetItemCooldownFn = (C_Container and C_Container.GetItemCooldown)
     or (C_Item and C_Item.GetItemCooldown) or GetItemCooldown
-local function EntryCooldown(e)
+
+local function PaintCooldown(cd, e)
+    if not cd then return end
+
     if e.kind == "spell" then
-        local cd = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(e.id)
-        if type(cd) == "table" then return cd.startTime or 0, cd.duration or 0 end
-    elseif (e.kind == "toy" or e.kind == "item") and GetItemCooldownFn then
-        return GetItemCooldownFn(e.id)   -- 玩具和物品都走物品冷却
+        local info
+        if C_Spell and C_Spell.GetSpellCooldown then
+            local ok, v = pcall(C_Spell.GetSpellCooldown, e.id)
+            if ok and type(v) == "table" then info = v end
+        end
+        -- isActive 是 NeverSecret：能读到、且明确是 false，就说明确实不在冷却，直接清掉。
+        -- 注意判断顺序：先 issecretvalue 再比 nil / 比 false，秘密值一旦参与比较就抛错。
+        if info then
+            local ok, ia = pcall(function() return info.isActive end)
+            if ok and not issecretvalue(ia) and ia ~= nil and ia == false then
+                cd:Clear()
+                return
+            end
+        end
+
+        -- 首选：DurationObject（秘密环境下唯一可行的通道）
+        if C_Spell and C_Spell.GetSpellCooldownDuration then
+            local ok, durObj = pcall(C_Spell.GetSpellCooldownDuration, e.id)
+            if ok and durObj then
+                if pcall(cd.SetCooldownFromDurationObject, cd, durObj) then return end
+            end
+        end
+        -- 退回：数值通道，先判秘密再比较（对秘密值做 > 会直接抛错）
+        if info then
+            local s, d = info.startTime, info.duration
+            if not issecretvalue(s) and not issecretvalue(d) and d and d > 1.5 then
+                pcall(cd.SetCooldown, cd, s or 0, d)
+                return
+            end
+        end
+
+    elseif e.kind == "toy" or e.kind == "item" then
+        -- 引擎若提供物品冷却的 DurationObject，优先走它（跨版本防御性探测）
+        local durFn = (C_Container and C_Container.GetItemCooldownDuration)
+            or (C_Item and C_Item.GetItemCooldownDuration)
+        if durFn then
+            local ok, durObj = pcall(durFn, e.id)
+            if ok and durObj then
+                if pcall(cd.SetCooldownFromDurationObject, cd, durObj) then return end
+            end
+        end
+        if GetItemCooldownFn then
+            local ok, s, d = pcall(GetItemCooldownFn, e.id)
+            if ok and not issecretvalue(s) and not issecretvalue(d) and s and d and d > 1.5 then
+                pcall(cd.SetCooldown, cd, s, d)
+                return
+            end
+        end
     end
-    return nil   -- 特殊动作（macro）没有冷却，也不会拿 nil 去查物品冷却
+
+    cd:Clear()
 end
 
 -- 安全按钮池：按钮只建一次（安全属性战斗中不能写、重建代价高），多余的隐藏备用。
@@ -654,7 +715,8 @@ local function EnsureExtraButton(index)
         end
     end)
 
-    -- 冷却显示（节流刷新，避免每帧查询；start/duration 都是秒）
+    -- 冷却显示（节流刷新，避免每帧查询）。秘密环境下数值不可读，
+    -- PaintCooldown 内部会走 DurationObject 通道或直接不画，绝不把秘密值交给 SetCooldown。
     local t = 0
     b:SetScript("OnUpdate", function(self, dt)
         local e = self._entry
@@ -662,17 +724,7 @@ local function EnsureExtraButton(index)
         t = t + dt
         if t < 0.25 then return end
         t = 0
-        local start, dur = EntryCooldown(e)
-        if not start or not dur then
-            self.cd:Clear()
-        elseif issecretvalue(start) or issecretvalue(dur) then
-            -- 秘密值不能比较（比较会抛错），原样交给冷却框
-            self.cd:SetCooldown(start, dur)
-        elseif dur > 0 and start > 0 then
-            self.cd:SetCooldown(start, dur)
-        else
-            self.cd:Clear()
-        end
+        PaintCooldown(self.cd, e)
     end)
 
     extraButtons[index] = b
