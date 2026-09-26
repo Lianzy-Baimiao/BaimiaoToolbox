@@ -76,6 +76,26 @@ local function GetRangeLib()
     return rangeLib or nil
 end
 
+-- 12.x 起 IsItemInRange / UnitInRange 这类测距接口可能是“受保护函数”：从插件（非硬件
+-- 事件）路径调用会触发 ADDON_ACTION_BLOCKED，被 BugSack 逐条抓下来刷屏——而且这不是
+-- Lua 报错，pcall 拦不住。策略：监听 ADDON_ACTION_BLOCKED，一旦发现本插件“刚发起测距、
+-- 随即被系统拦截”，就永久停用测距（本次登录 + 按客户端版本持久化），距离退回“未知区间”，
+-- 不再撞墙。这样最多在换版本后的首个目标上留一条拦截记录，之后彻底安静。
+local rangeBlocked = false     -- 被系统拦截过就置真，之后不再调用受保护测距接口
+local rangeProbeAt = 0         -- 最近一次测距尝试的时间戳，用来认领“紧随其后”的拦截
+
+local function CurBuild() return select(4, GetBuildInfo()) end
+
+local blockWatcher = CreateFrame("Frame")
+blockWatcher:RegisterEvent("ADDON_ACTION_BLOCKED")
+blockWatcher:SetScript("OnEvent", function(_, _, addon)
+    -- 只认领“刚发起过测距、随即到来的本插件拦截”，别把别的模块的拦截也算到测距头上。
+    if addon == ADDON and (GetTime() - rangeProbeAt) < 0.5 then
+        rangeBlocked = true
+        DB().rangeBlockedBuild = CurBuild()   -- 记下是哪个客户端版本封的，换版本会自动重试一次
+    end
+end)
+
 -- 内置兜底：几个已知射程的物品，用 C_Item.IsItemInRange 由近到远试，
 -- 命中最近的那个就得到“<=该射程”的上界；再配合上一档得到下界。
 -- 物品 id 可能随版本失效，失效时该档自动跳过。
@@ -94,6 +114,10 @@ local HARM_ORDER = { 5, 8, 10, 20, 25, 30, 35, 40 }
 
 -- 返回 minRange, maxRange（数字，码）。测不出返回 nil。
 local function GetTargetRange(unit)
+    -- 系统已拦截过测距：彻底停用，避免 0.1s 刷新一直撞受保护函数刷屏。
+    if rangeBlocked then return nil end
+    rangeProbeAt = GetTime()   -- 标记：紧随其后的本插件 ADDON_ACTION_BLOCKED 认作测距被拦
+
     local lib = GetRangeLib()
     if lib then
         -- 库的检查器在 12.x 可能撞上秘密值而报错：出错就退回下面的内置兜底，
@@ -547,6 +571,10 @@ ns.RegisterModule({
     desc = "屏上显示坐标/移速/到目标的距离区间，点击按模板把坐标通报到频道。",
     defaults = defaults,
     OnEnable = function()
+        -- 上次已在当前客户端版本被系统封过测距：直接跳过探测，本次登录不再产生拦截记录。
+        if DB().rangeBlockedBuild and DB().rangeBlockedBuild == CurBuild() then
+            rangeBlocked = true
+        end
         CreateButton()
         displayActive = true
         SetupTargetEvent()

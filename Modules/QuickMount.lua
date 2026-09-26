@@ -72,6 +72,7 @@ local defaults = {
         grow = "RIGHT",    -- 生长方向：RIGHT/LEFT/UP/DOWN（默认向右）
         text = "",         -- 每行一条的技能/玩具/物品配置（ID 或名称）
         showLabels = true, -- 按钮下方显示短名（动作名 / 名字前几个字）
+        collapsed = false, -- 收起：暂时藏起那排扩展按钮，主按钮旁留个箭头随时展开
     },
 }
 -- 布局字段（point/relPoint/x/y/locked）从 1.2.0 起存角色档，见 LayoutDB()。
@@ -247,6 +248,22 @@ local GROW_ANCHORS = {
     LEFT  = { point = "RIGHT",  rel = "LEFT",    dx = -1, dy =  0 },
     UP    = { point = "BOTTOM", rel = "TOP",     dx =  0, dy =  1 },
     DOWN  = { point = "TOP",    rel = "BOTTOM",  dx =  0, dy = -1 },
+}
+
+-- 展开/收起小开关贴在主按钮“生长方向那条边”的内侧（不外凸，免得压住第一个扩展按钮）。
+local COLLAPSE_TAB_POS = {
+    RIGHT = { point = "RIGHT",  rel = "RIGHT",  dx = -1, dy =  0 },
+    LEFT  = { point = "LEFT",   rel = "LEFT",   dx =  1, dy =  0 },
+    UP    = { point = "TOP",    rel = "TOP",    dx =  0, dy = -1 },
+    DOWN  = { point = "BOTTOM", rel = "BOTTOM", dx =  0, dy =  1 },
+}
+-- 箭头（用 GBK 都覆盖的 ←↑→↓，各字体都画得出，不会出豆腐块）：
+-- 收起时指向生长方向（点它=展开），展开时指回主按钮（点它=收起）。
+local COLLAPSE_ARROW = {
+    RIGHT = { collapsed = "→", expanded = "←" },
+    LEFT  = { collapsed = "←", expanded = "→" },
+    UP    = { collapsed = "↑", expanded = "↓" },
+    DOWN  = { collapsed = "↓", expanded = "↑" },
 }
 local KIND_LABEL = { macro = "动作", spell = "技能", toy = "玩具", item = "物品" }
 
@@ -809,6 +826,27 @@ local function CheckExtraConfig()
     for _, line in ipairs(ExtraCheckLines()) do ns.Print("  " .. line) end
 end
 
+-- 更新“展开/收起”小开关：只有在（模块开 + 主按钮开 + 扩展开 + 至少 1 条已识别）时才显示，
+-- 位置贴在生长方向那条边，箭头随收起/展开状态翻向。开关本身是普通按钮（非安全框），
+-- 战斗中也能随便显隐/移动；真正藏起那排安全按钮仍走 RebuildExtraButtons 的脱战补处理。
+local function UpdateCollapseTab()
+    local tab = button and button.collapseTab
+    if not tab then return end
+    local cfg = DB().extra
+    local ok = select(1, CountExtra(cfg.text))   -- 已识别条目数
+    local canShow = ns.IsModuleEnabled(MODULE_ID) and DB().button.enabled
+        and cfg.enabled and ok > 0
+    if not canShow then tab:Hide() return end
+
+    local grow = cfg.grow or "RIGHT"
+    local collapsed = cfg.collapsed and true or false
+    local pos = COLLAPSE_TAB_POS[grow] or COLLAPSE_TAB_POS.RIGHT
+    tab:ClearAllPoints()
+    tab:SetPoint(pos.point, button, pos.rel, pos.dx, pos.dy)
+    tab.arrow:SetText((COLLAPSE_ARROW[grow] or COLLAPSE_ARROW.RIGHT)[collapsed and "collapsed" or "expanded"])
+    tab:Show()
+end
+
 -- 按当前配置重建扩展按钮，返回（成功数, 未识别数）。
 -- 安全属性只能在非战斗锁定状态下写：战斗中先挂起，脱战（PLAYER_REGEN_ENABLED）自动补上。
 local function RebuildExtraButtons()
@@ -820,8 +858,9 @@ local function RebuildExtraButtons()
     pendingRebuild = nil
 
     local cfg = DB().extra
-    -- 主按钮关掉 / 模块关掉 / 扩展开关关掉，三种情况都收起
-    local shown = ns.IsModuleEnabled(MODULE_ID) and DB().button.enabled and cfg.enabled
+    -- 主按钮关掉 / 模块关掉 / 扩展开关关掉 / 手动收起，四种情况都不显示那排按钮
+    local shown = ns.IsModuleEnabled(MODULE_ID) and DB().button.enabled
+        and cfg.enabled and not cfg.collapsed
     local entries, fail = {}, 0
     for _, line in ipairs(EachExtraLine(cfg.text)) do
         local good, entry = pcall(ParseExtraLine, line)
@@ -861,11 +900,13 @@ local function RebuildExtraButtons()
         b.label:Hide()
         b._entry = nil
     end
+    UpdateCollapseTab()   -- 条目数 / 生长方向 / 收起状态可能都变了，同步一下开关
     return #entries, fail
 end
 
 -- 收起所有扩展按钮（模块被总开关关掉时用）。战斗中不动安全框，等脱战重建时处理。
 local function HideExtraButtons()
+    if button and button.collapseTab then button.collapseTab:Hide() end
     if InCombatLockdown() then
         pendingRebuild = true
         return
@@ -874,6 +915,13 @@ local function HideExtraButtons()
         b:Hide()
         b._entry = nil
     end
+end
+
+-- 展开/收起那排扩展按钮：改状态 + 重建（战斗中自动挂起、脱战补上）+ 立刻翻箭头。
+local function SetCollapsed(v)
+    DB().extra.collapsed = v and true or false
+    RebuildExtraButtons()   -- 非战斗：立即显隐；战斗：挂起，脱战自动补
+    UpdateCollapseTab()     -- 箭头方向立刻反映意图（即便安全按钮要脱战才真正显隐）
 end
 
 local function UpdateButton()
@@ -935,6 +983,7 @@ local function CreateButton()
                 "Ctrl+左键：拍卖行　　Alt+左键：载人",
                 "右键：水下坐骑",
                 "扩展按钮：技能 / 玩具 / 物品 / 小退·退组·重载 等，在设置里添加",
+                "有扩展按钮时，边上的小箭头可一键展开/收起那排按钮",
                 "Alt+右键：打开设置（命令 /qm 或 /bm quickmount）",
             },
         },
@@ -957,6 +1006,33 @@ local function CreateButton()
         if mouseButton ~= "LeftButton" then return end  -- 右键统一交给工厂处理
         Summon(CurrentCategory())
     end)
+
+    -- 展开/收起小开关：普通按钮，做主按钮的子件（跟着位移/缩放走），压在图标之上。
+    -- 它不是安全框，可随时显隐/移动；真正藏那排安全按钮由 RebuildExtraButtons 负责
+    -- （战斗中挂起、脱战自动补），所以战斗中点它只翻箭头，脱战后那排按钮才真正显隐。
+    local tab = CreateFrame("Button", "BaimiaoQuickMountCollapse", button)
+    tab:SetSize(15, 15)
+    tab:SetFrameLevel(button:GetFrameLevel() + 20)
+    tab:EnableMouse(true)
+    tab:RegisterForClicks("LeftButtonUp")
+    local tbg = tab:CreateTexture(nil, "BACKGROUND")
+    tbg:SetAllPoints(tab)
+    tbg:SetColorTexture(0, 0, 0, 0.6)
+    tab.arrow = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tab.arrow:SetPoint("CENTER", 0, 0)
+    tab.arrow:SetTextColor(0.05, 0.83, 0.62)   -- 主题翠绿
+    local thl = tab:CreateTexture(nil, "HIGHLIGHT")
+    thl:SetAllPoints(tab)
+    thl:SetColorTexture(1, 1, 1, 0.15)
+    tab:SetScript("OnClick", function() SetCollapsed(not DB().extra.collapsed) end)
+    tab:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(DB().extra.collapsed and "展开扩展按钮" or "收起扩展按钮", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    tab:Hide()
+    button.collapseTab = tab
 
     -- 修饰键按下/松开时刷新图标，让按钮实时反映将要召唤的坐骑。
     -- 事件在 SetupButtonEvents() 里注册（OnEnable 调用；OnDisable 会全部摘掉）。
@@ -1080,6 +1156,9 @@ local function BuildOptions(panel, m, L)
     L:Check("按钮下方显示短名（动作名 / 名字前几个字）",
         function() return DB().extra.showLabels ~= false end,
         function(v) DB().extra.showLabels = v end, Refresh)
+    L:Check("收起扩展按钮（只藏那排按钮，主按钮旁留个箭头随时展开；也可点箭头切换）",
+        function() return DB().extra.collapsed end,
+        function(v) DB().extra.collapsed = v end, Refresh)
     L:Slider("BaimiaoQuickMountLabelCharsSlider", "短名字数上限", 2, 6, 1,
         function() return tonumber(DB().extra.labelChars) or DEFAULT_LABEL_CHARS end,
         function(v) DB().extra.labelChars = v end, Refresh)
@@ -1179,6 +1258,13 @@ local function SetupSlash()
             ns.Print("快捷按钮：已清除" .. CAT_LABEL[arg] .. "坐骑。")
         elseif cmd == "check" then
             CheckExtraConfig()   -- 逐行体检扩展按钮配置
+        elseif cmd == "collapse" or cmd == "fold" or cmd == "收起" then
+            SetCollapsed(true);  ns.Print("快捷按钮：已收起扩展按钮。")
+        elseif cmd == "expand" or cmd == "unfold" or cmd == "展开" then
+            SetCollapsed(false); ns.Print("快捷按钮：已展开扩展按钮。")
+        elseif cmd == "toggle" then
+            SetCollapsed(not DB().extra.collapsed)
+            ns.Print("快捷按钮：扩展按钮已" .. (DB().extra.collapsed and "收起" or "展开") .. "。")
         elseif cmd == "help" then
             PrintExtraHelp()     -- 扩展按钮完整说明
         elseif cmd == "diag" then
