@@ -72,7 +72,7 @@ local defaults = {
         grow = "RIGHT",    -- 生长方向：RIGHT/LEFT/UP/DOWN（默认向右）
         text = "",         -- 每行一条的技能/玩具/物品配置（ID 或名称）
         showLabels = true, -- 按钮下方显示短名（动作名 / 名字前几个字）
-        collapsed = false, -- 收起：暂时藏起那排扩展按钮，主按钮旁留个箭头随时展开
+        collapsed = false, -- 收起：暂时藏起那排扩展按钮，悬停主按钮显示文字控制钮
     },
 }
 -- 布局字段（point/relPoint/x/y/locked）从 1.2.0 起存角色档，见 LayoutDB()。
@@ -198,15 +198,16 @@ local function Summon(cat)
         -- 校验拥有且可用
         local name, _, _, _, isUsable, _, _, _, _, _, isCollected = C_MountJournal.GetMountInfoByID(id)
         if not isCollected then
-            ns.Print("快捷按钮：" .. (CAT_LABEL[cat] or cat) .. "坐骑你还没收藏，改用随机。")
-            C_MountJournal.SummonByID(0)
+            ns.Print("快捷按钮：" .. (CAT_LABEL[cat] or cat) .. "坐骑你还没收藏，请在设置中重新绑定。")
+            if cat == "fly" then C_MountJournal.SummonByID(0) end
             return
         end
         C_MountJournal.SummonByID(id)
     else
-        -- 未设：飞行/无候选 -> 随机收藏坐骑；游戏会按当前环境选合适的。
+        -- 只有飞行用途可回退到随机；随机收藏并不保证满足水下等专门用途。
         if cat ~= "fly" then
-            ns.Print("快捷按钮：未设置" .. (CAT_LABEL[cat] or cat) .. "坐骑（也没找到合适的默认），改用随机。可在设置里指定。")
+            ns.Print("快捷按钮：未设置" .. (CAT_LABEL[cat] or cat) .. "坐骑（也没找到合适的默认），请在设置里指定；不会改用随机坐骑。")
+            return
         end
         C_MountJournal.SummonByID(0)
     end
@@ -239,6 +240,7 @@ end
 --------------------------------------------------------------------------------
 
 local button                -- 主按钮（CreateButton 里创建；先声明供下方闭包使用）
+local appliedCollapsed      -- last successfully applied visibility, distinct from combat requests
 local pendingRebuild        -- 战斗中无法重建安全按钮时挂起的标记
 
 local EXTRA_SIZE = 44                -- 与主按钮同尺寸
@@ -250,20 +252,12 @@ local GROW_ANCHORS = {
     DOWN  = { point = "TOP",    rel = "BOTTOM",  dx =  0, dy = -1 },
 }
 
--- 展开/收起小开关贴在主按钮“生长方向那条边”的内侧（不外凸，免得压住第一个扩展按钮）。
+-- Keep the control outside both the mount icon and the extension growth axis.
 local COLLAPSE_TAB_POS = {
-    RIGHT = { point = "RIGHT",  rel = "RIGHT",  dx = -1, dy =  0 },
-    LEFT  = { point = "LEFT",   rel = "LEFT",   dx =  1, dy =  0 },
-    UP    = { point = "TOP",    rel = "TOP",    dx =  0, dy = -1 },
-    DOWN  = { point = "BOTTOM", rel = "BOTTOM", dx =  0, dy =  1 },
-}
--- 箭头（用 GBK 都覆盖的 ←↑→↓，各字体都画得出，不会出豆腐块）：
--- 收起时指向生长方向（点它=展开），展开时指回主按钮（点它=收起）。
-local COLLAPSE_ARROW = {
-    RIGHT = { collapsed = "→", expanded = "←" },
-    LEFT  = { collapsed = "←", expanded = "→" },
-    UP    = { collapsed = "↑", expanded = "↓" },
-    DOWN  = { collapsed = "↓", expanded = "↑" },
+    RIGHT = {point="BOTTOM",rel="TOP",dx=0,dy=8},
+    LEFT  = {point="BOTTOM",rel="TOP",dx=0,dy=8},
+    UP    = {point="LEFT",rel="RIGHT",dx=8,dy=0},
+    DOWN  = {point="LEFT",rel="RIGHT",dx=8,dy=0},
 }
 local KIND_LABEL = { macro = "动作", spell = "技能", toy = "玩具", item = "物品" }
 
@@ -826,9 +820,8 @@ local function CheckExtraConfig()
     for _, line in ipairs(ExtraCheckLines()) do ns.Print("  " .. line) end
 end
 
--- 更新“展开/收起”小开关：只有在（模块开 + 主按钮开 + 扩展开 + 至少 1 条已识别）时才显示，
--- 位置贴在生长方向那条边，箭头随收起/展开状态翻向。开关本身是普通按钮（非安全框），
--- 战斗中也能随便显隐/移动；真正藏起那排安全按钮仍走 RebuildExtraButtons 的脱战补处理。
+-- The external text control shows the next action or an explicit pending request.
+-- Visibility changes to secure extension buttons are deferred until combat ends.
 local function UpdateCollapseTab()
     local tab = button and button.collapseTab
     if not tab then return end
@@ -843,8 +836,11 @@ local function UpdateCollapseTab()
     local pos = COLLAPSE_TAB_POS[grow] or COLLAPSE_TAB_POS.RIGHT
     tab:ClearAllPoints()
     tab:SetPoint(pos.point, button, pos.rel, pos.dx, pos.dy)
-    tab.arrow:SetText((COLLAPSE_ARROW[grow] or COLLAPSE_ARROW.RIGHT)[collapsed and "collapsed" or "expanded"])
-    tab:Show()
+    local pending=InCombatLockdown() and appliedCollapsed~=nil and collapsed~=appliedCollapsed
+    tab:SetText(pending and (collapsed and "待收起" or "待展开") or ((collapsed and "展开 " or "收起 ")..ok))
+    tab.pending=pending
+    tab:SetShown(tab.hoverActive == true)
+    if GameTooltip:IsOwned(tab) and GameTooltip:IsShown() then tab:GetScript("OnEnter")(tab) end
 end
 
 -- 按当前配置重建扩展按钮，返回（成功数, 未识别数）。
@@ -856,6 +852,7 @@ local function RebuildExtraButtons()
         return 0, 0
     end
     pendingRebuild = nil
+    appliedCollapsed=DB().extra.collapsed and true or false
 
     local cfg = DB().extra
     -- 主按钮关掉 / 模块关掉 / 扩展开关关掉 / 手动收起，四种情况都不显示那排按钮
@@ -917,11 +914,13 @@ local function HideExtraButtons()
     end
 end
 
--- 展开/收起那排扩展按钮：改状态 + 重建（战斗中自动挂起、脱战补上）+ 立刻翻箭头。
+-- Save the requested state and rebuild when safe; keep the settings checkbox in sync.
 local function SetCollapsed(v)
     DB().extra.collapsed = v and true or false
     RebuildExtraButtons()   -- 非战斗：立即显隐；战斗：挂起，脱战自动补
-    UpdateCollapseTab()     -- 箭头方向立刻反映意图（即便安全按钮要脱战才真正显隐）
+    UpdateCollapseTab()
+    local m=ns.modules[MODULE_ID]
+    if m and m._syncLayout then m._syncLayout:SyncAll() end
 end
 
 local function UpdateButton()
@@ -983,7 +982,7 @@ local function CreateButton()
                 "Ctrl+左键：拍卖行　　Alt+左键：载人",
                 "右键：水下坐骑",
                 "扩展按钮：技能 / 玩具 / 物品 / 小退·退组·重载 等，在设置里添加",
-                "有扩展按钮时，边上的小箭头可一键展开/收起那排按钮",
+                "悬停主图标显示展开/收起按钮；也可中键点击主图标切换",
                 "Alt+右键：打开设置（命令 /qm 或 /bm quickmount）",
             },
         },
@@ -1002,37 +1001,58 @@ local function CreateButton()
         self.icon:SetTexture(CategoryIcon(CurrentCategory()))
     end
 
+    button:RegisterForClicks("LeftButtonUp","RightButtonUp","MiddleButtonUp")
     button:SetScript("OnClick", function(self, mouseButton)
+        if mouseButton=="MiddleButton" then
+            if DB().extra.enabled then SetCollapsed(not DB().extra.collapsed) end
+            return
+        end
         if mouseButton ~= "LeftButton" then return end  -- 右键统一交给工厂处理
         Summon(CurrentCategory())
     end)
 
-    -- 展开/收起小开关：普通按钮，做主按钮的子件（跟着位移/缩放走），压在图标之上。
-    -- 它不是安全框，可随时显隐/移动；真正藏那排安全按钮由 RebuildExtraButtons 负责
-    -- （战斗中挂起、脱战自动补），所以战斗中点它只翻箭头，脱战后那排按钮才真正显隐。
-    local tab = CreateFrame("Button", "BaimiaoQuickMountCollapse", button)
-    tab:SetSize(15, 15)
-    tab:SetFrameLevel(button:GetFrameLevel() + 20)
-    tab:EnableMouse(true)
-    tab:RegisterForClicks("LeftButtonUp")
-    local tbg = tab:CreateTexture(nil, "BACKGROUND")
-    tbg:SetAllPoints(tab)
-    tbg:SetColorTexture(0, 0, 0, 0.6)
-    tab.arrow = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    tab.arrow:SetPoint("CENTER", 0, 0)
-    tab.arrow:SetTextColor(0.05, 0.83, 0.62)   -- 主题翠绿
-    local thl = tab:CreateTexture(nil, "HIGHLIGHT")
-    thl:SetAllPoints(tab)
-    thl:SetColorTexture(1, 1, 1, 0.15)
-    tab:SetScript("OnClick", function() SetCollapsed(not DB().extra.collapsed) end)
+    -- Non-secure request control. Protected extensions still wait for combat end.
+    local tab = CreateFrame("Button", "BaimiaoQuickMountCollapse", button,"UIPanelButtonTemplate")
+    tab:SetSize(80,26)
+    tab:SetFrameLevel(button:GetFrameLevel()+20)
+    tab:EnableMouse(true);tab:RegisterForClicks("LeftButtonUp")
+    ns.UI.SkinTextButton(tab)
+    tab:SetScript("OnClick", function(self) SetCollapsed(not DB().extra.collapsed); if GameTooltip:IsOwned(self) then self:GetScript("OnEnter")(self) end end)
     tab:SetScript("OnEnter", function(self)
+        self.hoverActive=true; self.hideRemaining=nil
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(DB().extra.collapsed and "展开扩展按钮" or "收起扩展按钮", 1, 1, 1)
+        if self.pending then
+            GameTooltip:SetText(DB().extra.collapsed and "等待脱战后收起" or "等待脱战后展开")
+            GameTooltip:AddLine("战斗中不能改变安全按钮的显示。再次点击可取消本次等待。",1,0.8,0.3,true)
+        else
+            GameTooltip:SetText(DB().extra.collapsed and "展开扩展按钮" or "收起扩展按钮",1,1,1)
+            GameTooltip:AddLine("中键点击主坐骑图标也可切换；不会召唤坐骑。",1,1,1,true)
+        end
         GameTooltip:Show()
     end)
-    tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    tab:SetScript("OnLeave", function(self)
+        self.hideRemaining=0.45
+        if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+    end)
+    tab:SetScript("OnHide", function(self) if GameTooltip:IsOwned(self) then GameTooltip:Hide() end end)
     tab:Hide()
     button.collapseTab = tab
+    -- Keep the control reachable across the gap; never hide secure extensions here.
+    tab:SetScript("OnUpdate", function(self, elapsed)
+        if not self.hideRemaining then return end
+        self.hideRemaining=self.hideRemaining-elapsed
+        if self.hideRemaining<=0 then
+            self.hideRemaining=nil; self.hoverActive=false; self:Hide()
+        end
+    end)
+    button:HookScript("OnEnter", function()
+        tab.hoverActive=true; tab.hideRemaining=nil
+        UpdateCollapseTab()
+    end)
+    button:HookScript("OnLeave", function() tab.hideRemaining=0.45 end)
+    button:HookScript("OnHide", function()
+        tab.hoverActive=false; tab.hideRemaining=nil; tab:Hide()
+    end)
 
     -- 修饰键按下/松开时刷新图标，让按钮实时反映将要召唤的坐骑。
     -- 事件在 SetupButtonEvents() 里注册（OnEnable 调用；OnDisable 会全部摘掉）。
@@ -1086,24 +1106,22 @@ local function DiagWidgets()
     ns.Print(("  参照：GameFontNormal = %s / %s / [%s]"):format(tostring(p), tostring(s), tostring(fl)))
 end
 
-local function BuildOptions(panel, m, L)
+local function BuildOptions(panel,m,L)
     L:Title("快捷按钮")
-    L:Text("一键快捷：一个按钮按修饰键召唤不同用途坐骑（左键飞行、Shift+左键修理、Ctrl+左键拍卖行、" ..
-        "Alt+左键载人、右键水下），图标随修饰键实时变化；旁边还能长出一排自定义按钮" ..
-        "（技能 / 玩具 / 物品 / 小退·退组·重载等快捷动作）。", false)
-
-    L:Section("按钮")
-    L:Check("锁定位置（锁定后隐藏背景、不能拖动；Alt+左键仍可拖）",
-        function() return LayoutDB().locked end,
-        function(v) LayoutDB().locked = v end, Refresh)
-    L:Slider("BaimiaoQuickMountScaleSlider", "缩放", 0.5, 2.0, 0.05,
-        function() return DB().button.scale or 1 end,
-        function(v) DB().button.scale = v end, Refresh)
-
-    L:Section("各用途坐骑（“设为当前”抓取，或直接在下面填名字 / mountID）")
+    L:Text("坐骑按用途绑定；扩展内容与外观布局分开编辑，战斗中仍由安全按钮执行。",true)
+    m.optionTabs=ns.UI.OptionTabs(panel,L,{
+        {name="坐骑绑定",width=150,build=function(panel,L,onResize)
+    L:Text("选择用途后，骑上目标坐骑点「设为当前」，也可直接填坐骑名或 mountID。",true)
+    local entries={}
     for _, cat in ipairs(CATS) do
+        local category=cat
+        entries[#entries+1]={name=CAT_LABEL[category],width=126,build=function(_,L)
+        local cat=category
         local label = CAT_LABEL[cat]
-        L:DynLabel(function()
+        local keys={fly="左键",repair="Shift + 左键",ah="Ctrl + 左键",passenger="Alt + 左键",water="右键"}
+        L:Section(label .. "坐骑")
+        L:Text("使用方式：" .. keys[cat] .. " 点击游戏中的主坐骑按钮。",true)
+        local status=L:DynLabel(function()
             local stored = DB().mounts[cat]
             if stored then
                 local id = ResolveStoredMount(stored)
@@ -1119,6 +1137,7 @@ local function BuildOptions(panel, m, L)
             end
             return label .. "：|cffaaaaaa" .. (cat == "fly" and "随机收藏坐骑" or "未设置（随机）") .. "|r"
         end)
+        status:SetHeight(44);L:step(24)
         local setBtn = L:Button(110, "设为当前", function()
             if CaptureCurrent(cat) then L:SyncAll() Refresh() end
         end)
@@ -1142,12 +1161,22 @@ local function BuildOptions(panel, m, L)
                 "清空 = 回到自动匹配 / 随机。",
             }
         end)
+        end}
     end
 
-    L:Section("扩展按钮（技能 · 玩具 · 物品 · 快捷动作）")
-    L:Check("显示扩展按钮（在主坐骑按钮旁长出一排同尺寸的按钮）",
-        function() return DB().extra.enabled end,
-        function(v) DB().extra.enabled = v end, Refresh)
+    m.mountTabs=ns.UI.OptionTabs(panel,L,entries,onResize)
+
+        end},
+        {name="外观与布局",width=150,build=function(panel,L)
+    L:Section("按钮")
+    L:Check("锁定位置（锁定后隐藏背景、不能拖动；Alt+左键仍可拖）",
+        function() return LayoutDB().locked end,
+        function(v) LayoutDB().locked = v end, Refresh)
+    L:Slider("BaimiaoQuickMountScaleSlider", "整体缩放（%）", 50, 200, 5,
+        function() return (DB().button.scale or 1)*100 end,
+        function(v) DB().button.scale = v/100 end, Refresh)
+
+    L:Section("扩展条布局")
     L:Dropdown(200, "生长方向：", ns.UI.ListFrom(
         { "RIGHT", "LEFT", "UP", "DOWN" },
         { RIGHT = "向右（默认）", LEFT = "向左", UP = "向上", DOWN = "向下" }),
@@ -1156,12 +1185,19 @@ local function BuildOptions(panel, m, L)
     L:Check("按钮下方显示短名（动作名 / 名字前几个字）",
         function() return DB().extra.showLabels ~= false end,
         function(v) DB().extra.showLabels = v end, Refresh)
-    L:Check("收起扩展按钮（只藏那排按钮，主按钮旁留个箭头随时展开；也可点箭头切换）",
+    L:Check("收起扩展按钮（点击图标外的文字按钮，或中键点击主图标切换）",
         function() return DB().extra.collapsed end,
         function(v) DB().extra.collapsed = v end, Refresh)
     L:Slider("BaimiaoQuickMountLabelCharsSlider", "短名字数上限", 2, 6, 1,
         function() return tonumber(DB().extra.labelChars) or DEFAULT_LABEL_CHARS end,
         function(v) DB().extra.labelChars = v end, Refresh)
+
+        end},
+        {name="扩展内容",width=150,build=function(panel,L)
+    L:Section("扩展按钮（技能 · 玩具 · 物品 · 快捷动作）")
+    L:Check("显示扩展按钮（在主坐骑按钮旁长出一排同尺寸的按钮）",
+        function() return DB().extra.enabled end,
+        function(v) DB().extra.enabled = v end, Refresh)
     L:Text("每行一条，例：|cff00ff88技能:460905|r　|cff00ff88玩具:216665 #银行|r（悬停输入框看完整写法）", true)
     L:step(8)   -- 折行会让 L:Text 的高度估算偏小，补一点间距，免得压住下面的输入框
     local boxCfg = L:Box(460, 110, true,
@@ -1176,7 +1212,7 @@ local function BuildOptions(panel, m, L)
     end)
     boxCfg:HookScript("OnLeave", function() GameTooltip:Hide() end)
     boxCfg:HookScript("OnMouseDown", function() GameTooltip:Hide() end)
-    L:DynLabel(function()
+    local status=L:DynLabel(function()
         local cfg = DB().extra
         if not ns.IsModuleEnabled(MODULE_ID) or not cfg.enabled then
             return "|cffaaaaaa扩展按钮未启用，勾选上面的开关生效|r"
@@ -1199,6 +1235,7 @@ local function BuildOptions(panel, m, L)
         return s
     end)
 
+    status:SetHeight(44);L:step(24)
     local checkBtn = L:Button(140, "检查配置", function(self)
         ShowLinesTooltip(self, "扩展按钮 · 检查配置", ExtraCheckLines())
     end)
@@ -1230,11 +1267,18 @@ local function BuildOptions(panel, m, L)
     -- 同一行的按钮不占步进高度，这里补一段，否则下面的说明文字会紧贴甚至压住按钮底边
     L:step(14)
 
-    L:step(6)
+
+        end},
+        {name="使用帮助",width=150,build=function(panel,L)
     L:Text("说明：飞行默认用“随机收藏坐骑”，游戏按能否飞行自动选。其余用途按坐骑中文名自动匹配你已收藏的：" ..
         "修理=牦牛/苔原猛犸象，拍卖行=鎏金雷龙，载人=沙石幼龙，水下=驯服的海马。" ..
-        "没匹配到、或想换别的，就在下面填名字，或骑上目标坐骑点“设为当前”。", true)
+        "没匹配到、或想换别的，就在「坐骑绑定」填名字，或骑上目标坐骑点“设为当前”。", true)
     L:step(12)
+    L:Section("扩展按钮写法")
+    for _,line in ipairs(EXTRA_HELP) do L:Text(line,true) end
+
+        end},
+    })
 end
 
 --------------------------------------------------------------------------------
@@ -1259,12 +1303,12 @@ local function SetupSlash()
         elseif cmd == "check" then
             CheckExtraConfig()   -- 逐行体检扩展按钮配置
         elseif cmd == "collapse" or cmd == "fold" or cmd == "收起" then
-            SetCollapsed(true);  ns.Print("快捷按钮：已收起扩展按钮。")
+            SetCollapsed(true); ns.Print(InCombatLockdown() and "快捷按钮：已请求收起，脱战后生效。" or "快捷按钮：已收起扩展按钮。")
         elseif cmd == "expand" or cmd == "unfold" or cmd == "展开" then
-            SetCollapsed(false); ns.Print("快捷按钮：已展开扩展按钮。")
+            SetCollapsed(false); ns.Print(InCombatLockdown() and "快捷按钮：已请求展开，脱战后生效。" or "快捷按钮：已展开扩展按钮。")
         elseif cmd == "toggle" then
             SetCollapsed(not DB().extra.collapsed)
-            ns.Print("快捷按钮：扩展按钮已" .. (DB().extra.collapsed and "收起" or "展开") .. "。")
+            ns.Print("快捷按钮：" .. (InCombatLockdown() and "脱战后应用：" or "扩展按钮已") .. (DB().extra.collapsed and "收起" or "展开") .. "。")
         elseif cmd == "help" then
             PrintExtraHelp()     -- 扩展按钮完整说明
         elseif cmd == "diag" then

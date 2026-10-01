@@ -6,3 +6,7 @@
 # 系统文件
 Thumbs.db
 .DS_Store
+
+# Offline test artifacts
+__pycache__/
+*.py[cod]

@@ -283,58 +283,53 @@ end
 -- 与我们的分组卡片风格不搭，下面提供统一的皮肤函数。
 --------------------------------------------------------------------------------
 
-local SKIN_BORDER = { 0.35, 0.55, 0.5, 0.85 }          -- 常态边框（偏灰绿）
-local SKIN_BORDER_HOVER = { 0.05, 0.83, 0.62, 1 }      -- hover：主题翠绿
-local SKIN_BORDER_FOCUS = { 0.05, 0.83, 0.62, 1 }      -- 聚焦：同主题色
+local SKIN_BORDER = { 0.20, 0.28, 0.29, 1 }
+local SKIN_BORDER_HOVER = { 0.35, 0.75, 0.65, 1 }
+local SKIN_BORDER_FOCUS = { 0.35, 0.75, 0.65, 1 }
 
--- 给一个 Frame/Button 套上卡片式背景（深色半透明底 + 细边框）。
 local function SkinCardFrame(f, alpha)
     if not f.SetBackdrop then Mixin(f, BackdropTemplateMixin) end
     f:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 10,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1,
     })
-    f:SetBackdropColor(0.06, 0.07, 0.07, alpha or 0.85)
-    f:SetBackdropBorderColor(unpack(SKIN_BORDER))
+    local function paint()
+        local p = ns.UI.palette
+        f:SetBackdropColor(unpack(p and p.card or {0.07, 0.10, 0.12, 1}))
+        f:SetBackdropBorderColor(unpack(p and p.border or SKIN_BORDER))
+    end
+    if ns.UI.OnTheme then ns.UI.OnTheme(paint) else paint() end
 end
-
--- 给可点控件加 hover 描边（进入亮绿，离开还原）。
 local function SkinHoverBorder(f)
-    f:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(unpack(SKIN_BORDER_HOVER)) end)
+    f:HookScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(unpack(ns.UI.palette and ns.UI.palette.accent or SKIN_BORDER_HOVER))
+    end)
     f:HookScript("OnLeave", function(self)
         if not self._skinFocused then
-            self:SetBackdropBorderColor(unpack(SKIN_BORDER))
+            self:SetBackdropBorderColor(unpack(ns.UI.palette and ns.UI.palette.border or SKIN_BORDER))
         end
     end)
 end
-
--- 皮肤化一个文本按钮：去掉模板贴图，改卡片底 + hover 高亮 + 字色。
 local function SkinTextButton(b)
-    -- UIPanelButtonTemplate 的左右中三段贴图清掉，换成卡片底。
     for _, region in ipairs({ b:GetRegions() }) do
-        if region:GetObjectType() == "Texture" then
-            region:SetTexture(nil)
-            region:Hide()
-        end
+        if region:GetObjectType() == "Texture" then region:SetTexture(nil); region:Hide() end
     end
-    SkinCardFrame(b, 0.55)
+    SkinCardFrame(b)
     SkinHoverBorder(b)
     local fs = b.GetFontString and b:GetFontString()
     if fs then
-        -- 去掉字体阴影与字体标记（OUTLINE / THICK 之类）：我们的底是深色卡片，
-        -- 暴雪默认的阴影/描边在上面只会让字看着发虚、像"重影"。
         local path, size = fs:GetFont()
-        if path then fs:SetFont(path, size, "") end
+        if path then fs:SetFont(path, math.max(size or 12, 12), "") end
         fs:SetShadowOffset(0, 0)
-        if fs.SetSpacing then fs:SetSpacing(0) end
-        fs:SetTextColor(0.9, 0.95, 0.93)
     end
-    b:SetScript("OnMouseDown", function(self) self:SetBackdropColor(0.10, 0.16, 0.13, 0.9) end)
-    b:SetScript("OnMouseUp", function(self) self:SetBackdropColor(0.06, 0.07, 0.07, 0.55) end)
-    b:HookScript("OnEnter", function(self) self:SetBackdropColor(0.08, 0.12, 0.10, 0.85) end)
-    b:HookScript("OnLeave", function(self) self:SetBackdropColor(0.06, 0.07, 0.07, 0.55) end)
+    local function paint(self, hover)
+        local p = ns.UI.palette
+        if p then self:SetBackdropColor(unpack(hover and p.hover or p.card)) end
+    end
+    b:HookScript("OnEnter", function(self) paint(self, true) end)
+    b:HookScript("OnLeave", function(self) paint(self, false) end)
+    b:HookScript("OnMouseDown", function(self) paint(self, true) end)
+    b:HookScript("OnMouseUp", function(self) paint(self, false) end)
 end
 ns.UI.SkinTextButton = SkinTextButton
 ns.UI.SkinCardFrame = SkinCardFrame
@@ -388,7 +383,8 @@ function ns.UI.NewLayout(panel)
     function L:Title(text)
         local fs = self.panel:CreateFontString(nil, "ARTWORK", "GameFontNormalHuge")
         fs:SetPoint("TOPLEFT", 16, self.y)
-        fs:SetText("|cff0cd29f" .. text .. "|r")  -- 主题翠绿色
+        fs:SetText(text)
+        if ns.UI.StyleText then ns.UI.StyleText(fs, "accent") end  -- 主题翠绿色
         self:step(38)
         return fs
     end
@@ -399,20 +395,14 @@ function ns.UI.NewLayout(panel)
         self:step(12)  -- 与上一块拉开间距
         local fs = self.panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         fs:SetPoint("TOPLEFT", 14, self.y)
-        fs:SetText("|cff0cd29f" .. text .. "|r")
-        self:step(20)  -- 标题高度
+        fs:SetText(text)
+        if ns.UI.StyleText then ns.UI.StyleText(fs, "accent") end
+        self:step(26)  -- 标题与卡片间距
 
         local card = CreateFrame("Frame", nil, self.panel, "BackdropTemplate")
         card:SetPoint("TOPLEFT", 8, self.y)
         card:SetPoint("TOPRIGHT", -8, self.y)
-        card:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 12,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 },
-        })
-        card:SetBackdropColor(0, 0, 0, 0.25)
-        card:SetBackdropBorderColor(0.35, 0.55, 0.5, 0.9)
+        SkinCardFrame(card)
         card:SetFrameLevel(self.panel:GetFrameLevel())
         self._card = card
         self._cardTopY = self.y
@@ -453,18 +443,22 @@ function ns.UI.NewLayout(panel)
         cb:SetSize(24, 24)
         cb:SetPoint("TOPLEFT", self.indent, self.y)
         local fs = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        fs:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+        fs:SetPoint("TOPLEFT", cb, "TOPRIGHT", 8, -4)
+        fs:SetWidth(math.max((self.panel:GetWidth() or 600) - self.indent - 62, 180))
+        fs:SetJustifyH("LEFT")
+        fs:SetWordWrap(true)
         fs:SetText(label)
         cb:SetScript("OnClick", function(self2)
             setter(self2:GetChecked() and true or false)
             if onChange then onChange() end
         end)
         self.syncers[#self.syncers + 1] = function() cb:SetChecked(getter() and true or false) end
-        self:step(26)
+        self:step(math.max(32, fs:GetStringHeight() + 12))
         return cb
     end
 
     function L:Box(w, h, multi, getter, setter, onChange)
+        if not multi then h = math.max(h, 28) end
         local box = CreateFrame("Frame", nil, self.panel, "BackdropTemplate")
         box:SetSize(w, h)
         box:SetPoint("TOPLEFT", self.indent, self.y)
@@ -561,6 +555,7 @@ function ns.UI.NewLayout(panel)
             flash:SetText("|cffffd100未保存*|r")
         end
         local function commit()
+            if InCombatLockdown() then return end
             setter(eb:GetText())
             dirty = false
             flash:SetText("|cff20ff40已保存|r")
@@ -570,6 +565,7 @@ function ns.UI.NewLayout(panel)
 
         -- 单行框的编辑态切换：点击卡片进入，回车/失焦确认，Esc 取消。
         local function exitEdit(apply)
+            if InCombatLockdown() then apply = false end
             if not box._editing then return end
             box._editing = false
             if apply then
@@ -810,6 +806,7 @@ function ns.UI.NewLayout(panel)
             ebHolder:SetBackdropBorderColor(unpack(SKIN_BORDER_FOCUS))
         end
         local function exitEdit(apply)
+            if InCombatLockdown() then apply = false end
             if not editing then return end
             editing = false
             if apply then
@@ -1054,6 +1051,7 @@ local function BuildAbout(L)
 end
 
 local function BuildSettings()
+    if ns.UI.BuildWorkspace then return ns.UI.BuildWorkspace() end
     local aboutHost, aboutLayout = MakePage("about")
     BuildAbout(aboutLayout)
     aboutLayout:SyncAll()  -- 建完立即同步一次，避免首次打开勾选状态不对
@@ -1101,6 +1099,7 @@ end
 
 -- 打开设置。传模块 id 直达其子页；不传则打开父页。
 function ns.OpenOptions(moduleId)
+    if ns.UI.OpenWorkspace then return ns.UI.OpenWorkspace(moduleId) end
     local m = moduleId and ns.modules[moduleId]
     if Settings and Settings.OpenToCategory then
         if m and m._category then

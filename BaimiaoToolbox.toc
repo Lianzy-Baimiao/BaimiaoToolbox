@@ -7,13 +7,16 @@
 ## SavedVariables: BaimiaoToolboxDB
 ## SavedVariablesPerCharacter: BaimiaoToolboxDBPC
 ## OptionalDeps: LibSharedMedia-3.0
-## Version: 1.4.0
+## Version: 1.8.3
 ## IconTexture: Interface\AddOns\BaimiaoToolbox\media\cat_icon.tga
 
 Core.lua
+Workspace.lua
 
 # 各功能模块（新增功能时在这里加一行即可）
 Modules\CoordShout.lua
 Modules\Reminder.lua
 Modules\QuickMount.lua
 Modules\RaidCooldowns.lua
+
+Modules\RotationGuide.lua

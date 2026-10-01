@@ -364,10 +364,44 @@ end
 -- 设置面板
 --------------------------------------------------------------------------------
 
-local function BuildOptions(panel, m, L)
-    L:Title("光环/宠物提示器")
-    L:Text("屏幕中间大字提醒。术士/猎人没宠物、骑士没开光环时弹出（射击专精不带宠物属正常，已豁免）。", false)
+local function BuildOptions(panel,m,L)
+    L:Title("光环 / 宠物提醒")
+    L:Text("按职业规则提醒缺少宠物或光环；先设触发条件，再测试外观。",true)
+    m.optionTabs=ns.UI.OptionTabs(panel,L,{
+        {name="提醒规则",width=150,build=function(panel,L)
+    L:Section("触发条件")
+    L:Check("术士/猎人 没有宠物时提醒",
+        function() return DB().rules.pet.enabled end,
+        function(v) DB().rules.pet.enabled = v end, Refresh)
+    L:Text("宠物提醒文字（支持 |cffRRGGBB 颜色码、\\n 无效请直接换行）:", true)
+    L:Box(460, 26, false,
+        function() return DB().rules.pet.text end,
+        function(v) DB().rules.pet.text = v end, Refresh)
+    L:Check("射击猎（射击专精）不带宠物不提醒（宠物是可选项）",
+        function() return DB().rules.pet.skipMarksmanship end,
+        function(v) DB().rules.pet.skipMarksmanship = v end, Refresh)
 
+
+    L:Check("骑士 没开光环时提醒",
+        function() return DB().rules.paladinAura.enabled end,
+        function(v) DB().rules.paladinAura.enabled = v end, Refresh)
+    L:Text("骑士光环提醒文字:", true)
+    L:Box(460, 26, false,
+        function() return DB().rules.paladinAura.text end,
+        function(v) DB().rules.paladinAura.text = v end, Refresh)
+
+
+    L:Section("提醒时机")
+    L:Check("只在脱战时提醒",
+        function() return DB().onlyOutOfCombat end,
+        function(v) DB().onlyOutOfCombat = v end, Refresh)
+    L:Check("死亡/鬼魂时不提醒",
+        function() return DB().hideWhenDead end,
+        function(v) DB().hideWhenDead = v end, Refresh)
+
+
+        end},
+        {name="外观与测试",width=150,build=function(panel,L)
     L:Section("外观")
     L:Slider("BaimiaoReminderFontSlider", "字号", 16, 72, 1,
         function() return DB().fontSize or 40 end,
@@ -383,46 +417,26 @@ local function BuildOptions(panel, m, L)
         function() return LayoutDB().locked end,
         function(v) LayoutDB().locked = v end, Refresh)
 
-    L:Section("触发条件")
-    L:Check("术士/猎人 没有宠物时提醒",
-        function() return DB().rules.pet.enabled end,
-        function(v) DB().rules.pet.enabled = v end, Refresh)
-    L:Text("宠物提醒文字（支持 |cffRRGGBB 颜色码、\\n 无效请直接换行）:", true)
-    L:Box(460, 26, false,
-        function() return DB().rules.pet.text end,
-        function(v) DB().rules.pet.text = v end, Refresh)
-    L:Check("射击猎（射击专精）不带宠物不提醒（宠物是可选项）",
-        function() return DB().rules.pet.skipMarksmanship end,
-        function(v) DB().rules.pet.skipMarksmanship = v end, Refresh)
+    L:Text("测试仅在自己屏幕上显示 3 秒，不向聊天频道发送内容。",true)
+    L:Button(160, "测试显示 3 秒", function()
+        testUntil = GetTime() + 3
+        Update()
+    end)
+        end},
+        {name="高级识别",width=150,build=function(panel,L)
+    L:Section("法术识别列表")
+    L:Text("通常无需修改。仅在版本变化导致识别异常时调整；请保留原列表供回退。",true)
     L:Text("算作“独来独往”的法术 id（逗号分隔，随版本可改）:", true)
     L:Box(460, 26, false,
         function() return DB().rules.pet.loneWolfSpells or DEFAULT_LONE_WOLF end,
         function(v) DB().rules.pet.loneWolfSpells = v end, Refresh)
-
-    L:Check("骑士 没开光环时提醒",
-        function() return DB().rules.paladinAura.enabled end,
-        function(v) DB().rules.paladinAura.enabled = v end, Refresh)
-    L:Text("骑士光环提醒文字:", true)
-    L:Box(460, 26, false,
-        function() return DB().rules.paladinAura.text end,
-        function(v) DB().rules.paladinAura.text = v end, Refresh)
     L:Text("算作“已开光环”的法术 id（逗号分隔，随版本可改）:", true)
     L:Box(460, 26, false,
         function() return DB().rules.paladinAura.spells end,
         function(v) DB().rules.paladinAura.spells = v end, Refresh)
 
-    L:Section("其它")
-    L:Check("只在脱战时提醒",
-        function() return DB().onlyOutOfCombat end,
-        function(v) DB().onlyOutOfCombat = v end, Refresh)
-    L:Check("死亡/鬼魂时不提醒",
-        function() return DB().hideWhenDead end,
-        function(v) DB().hideWhenDead = v end, Refresh)
-
-    L:Button(160, "测试显示 3 秒", function()
-        testUntil = GetTime() + 3
-        Update()
-    end)
+        end},
+    })
 end
 
 --------------------------------------------------------------------------------

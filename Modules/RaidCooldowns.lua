@@ -41,6 +41,7 @@ local SATED_DEBUFFS = {
 local defaults = {
     enabled = true,
     fontSize = 16,
+    showLust = true,
     showBrez = true,
     showSolo = true,    -- 单人时显示
     showParty = true,   -- 小队时显示
@@ -344,7 +345,9 @@ local function UpdateDisplay()
         frame:Hide()
         return
     end
-    frame:Show()
+    local showLust = d.showLust ~= false
+    frame:SetShown(showLust or d.showBrez)
+    frame.rows[1]:SetShown(showLust)
 
     -- 第一行：嗜血
     local lustTxt, lustCol = GetLustState()
@@ -369,10 +372,17 @@ local function UpdateDisplay()
     end
 
     -- 按内容自适应宽度
-    local w1 = frame.rows[1].icon:GetWidth() + 4 + frame.rows[1].text:GetStringWidth()
+    frame.rows[2]:ClearAllPoints()
+    if showLust then
+        frame.rows[2]:SetPoint("TOPLEFT", frame.rows[1], "BOTTOMLEFT", 0, -2)
+    else
+        frame.rows[2]:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -4)
+    end
+    frame.rows[2]:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
+    local w1 = showLust and (frame.rows[1].icon:GetWidth() + 4 + frame.rows[1].text:GetStringWidth()) or 0
     local w2 = d.showBrez and (frame.rows[2].icon:GetWidth() + 4 + frame.rows[2].text:GetStringWidth()) or 0
     frame:SetWidth(math.max(w1, w2, 60) + 12)
-    frame:SetHeight((d.showBrez and 2 or 1) * ((d.fontSize or 16) + 4) + 8)
+    frame:SetHeight(((showLust and 1 or 0) + (d.showBrez and 1 or 0)) * ((d.fontSize or 16) + 4) + 8)
 end
 
 local function CreateRow(parent, spellID)
@@ -423,7 +433,9 @@ local function CreateFrameOnce()
     -- 0.25s 刷新，倒计时够顺滑又不费。模块关闭时由 OnDisable 停掉。
     pollActive = true
     local acc = 0
-    frame:SetScript("OnUpdate", function(_, dt)
+    -- Keep music detection alive even when both visual rows are hidden.
+    local poll = CreateFrame("Frame", "BaimiaoRaidCDPoll", UIParent)
+    poll:SetScript("OnUpdate", function(_, dt)
         if not pollActive then return end
         acc = acc + dt
         if acc >= 0.25 then acc = 0 UpdateDisplay() end
@@ -446,13 +458,17 @@ end
 -- 设置面板
 --------------------------------------------------------------------------------
 
-local function BuildOptions(panel, m, L)
-    L:Title("嗜血 / 战复 监控")
-    L:Text("两行常驻显示：第一行嗜血状态（准备就绪/嗜血中/冷却倒计时），第二行战复剩余次数。", false)
-
+local function BuildOptions(panel,m,L)
+    L:Title("嗜血 / 战复监控")
+    L:Text("显示场景与音乐分开配置；试听只在本机播放。",true)
+    m.optionTabs=ns.UI.OptionTabs(panel,L,{
+        {name="显示与场景",width=150,build=function(panel,L)
     L:Section("显示")
+    L:Check("显示嗜血行", function() return DB().showLust ~= false end,
+        function(v) DB().showLust = v end, Refresh)
     L:Check("显示战复行", function() return DB().showBrez end,
         function(v) DB().showBrez = v end, Refresh)
+    L:Text("两行可分别开关；全部关闭时隐藏监控框，嗜血音乐仍由音乐页独立控制。",true)
     L:Check("锁定位置（锁定后隐藏背景、不能拖动；Alt+左键仍可拖）",
         function() return LayoutDB().locked end,
         function(v) LayoutDB().locked = v end, Refresh)
@@ -468,6 +484,12 @@ local function BuildOptions(panel, m, L)
         function() return DB().fontSize or 16 end,
         function(v) DB().fontSize = v end, Refresh)
 
+    L:Text("提示：团队里读共享战复池；单人/小队里读你自己职业的战复（惩戒骑=代祷，不在CD就是1）。" ..
+        "自己职业没有战复时显示「战复：无」，不会误报 1 次。" ..
+        "嗜血判定已内置常见变体（嗜血/英勇/时间扭曲/亲龙之赐/原始狂暴）。" ..
+        "锁定后可用 Alt+右键 打开本设置。", true)
+        end},
+        {name="音乐与试听",width=150,build=function(panel,L)
     L:Section("嗜血音乐")
     L:Check("嗜血触发时播放音乐",
         function() return DB().music.enabled end,
@@ -481,6 +503,14 @@ local function BuildOptions(panel, m, L)
     L:Dropdown(200, "声道：", ns.UI.ListFrom(SOUND_CHANNELS, CHANNEL_LABEL),
         function() return DB().music.channel or "Master" end,
         function(v) DB().music.channel = v end)
+    L:Text("悬停音乐列表可试听；自定义路径和循环间隔在右侧页面设置。",true)
+    local tryBtn = L:Button(120, "试听", function() PreviewMusic(nil, true) end)
+    L:Button(120, "停止", function() StopLustMusic() end, true, tryBtn)
+
+
+        end},
+        {name="循环与自定义",width=150,build=function(panel,L)
+    L:Section("高级音乐设置")
     L:Check("嗜血持续期间循环播放",
         function() return DB().music.loop end,
         function(v) DB().music.loop = v end)
@@ -496,10 +526,9 @@ local function BuildOptions(panel, m, L)
     local tryBtn = L:Button(120, "试听", function() PreviewMusic(nil, true) end)
     L:Button(120, "停止", function() StopLustMusic() end, true, tryBtn)
 
-    L:Text("提示：团队里读共享战复池；单人/小队里读你自己职业的战复（惩戒骑=代祷，不在CD就是1）。" ..
-        "自己职业没有战复时显示「战复：无」，不会误报 1 次。" ..
-        "嗜血判定已内置常见变体（嗜血/英勇/时间扭曲/亲龙之赐/原始狂暴）。" ..
-        "锁定后可用 Alt+右键 打开本设置。", true)
+
+        end},
+    })
 end
 
 --------------------------------------------------------------------------------

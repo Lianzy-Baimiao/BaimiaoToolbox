@@ -459,9 +459,11 @@ end
 -- 设置面板
 --------------------------------------------------------------------------------
 
-local function BuildOptions(panel, m, layout)
+local function BuildOptions(panel,m,layout)
     layout:Title("坐标喊话")
-
+    layout:Text("先选显示内容，再配置喊话模板；变量说明单独查阅。",true)
+    m.optionTabs=ns.UI.OptionTabs(panel,layout,{
+        {name="屏幕显示",width=150,build=function(panel,layout)
     layout:Section("显示")
     layout:Check("显示坐标", function() return DB().display.coord end,
         function(v) DB().display.coord = v end, Refresh)
@@ -487,10 +489,13 @@ local function BuildOptions(panel, m, layout)
     layout:Slider("BaimiaoCoordShoutFontSlider", "字号", 10, 40, 1,
         function() return DB().display.fontSize or 16 end,
         function(v) DB().display.fontSize = v end, Refresh)
-    layout:Slider("BaimiaoCoordShoutScaleSlider", "缩放", 0.5, 2.0, 0.05,
-        function() return DB().display.scale or 1 end,
-        function(v) DB().display.scale = v end, Refresh)
+    layout:Slider("BaimiaoCoordShoutScaleSlider", "整体缩放（%）", 50, 200, 5,
+        function() return (DB().display.scale or 1)*100 end,
+        function(v) DB().display.scale = v/100 end, Refresh)
 
+
+        end},
+        {name="通报模板",width=150,build=function(panel,layout)
     layout:Section("通报")
     layout:Check("通报前在脚下落地图路点（{waypoint} 才有链接）",
         function() return DB().announce.setWaypoint end,
@@ -514,6 +519,16 @@ local function BuildOptions(panel, m, layout)
         function() return DB().announce.templateTarget end,
         function(v) DB().announce.templateTarget = v end)
 
+    layout:Text("注意：下方发送按钮会向所选频道真实发送消息，并非仅本地预览。",true)
+    local resetBtn = layout:Button(140, "恢复默认模板", function()
+        DB().announce.templateNoTarget = DEFAULT_TPL_NOTARGET
+        DB().announce.templateTarget = DEFAULT_TPL_TARGET
+        layout:SyncAll()
+        ns.Print("坐标喊话：已恢复默认模板。")
+    end)
+    layout:Button(200, "发送一次（真实喊话）", function() Announce() end, true, resetBtn)
+        end},
+        {name="变量帮助",width=150,build=function(panel,layout)
     local help =
         "变量：{pvp} 战争模式   {waypoint} 路点链接   {map} 地图   {zone} 小地区   {area} 地图+小地区\n" ..
         "{coord} x/y   {x} {y} 单独坐标   {target} 目标名   {range} 距离区间\n" ..
@@ -523,13 +538,9 @@ local function BuildOptions(panel, m, layout)
     help = help:gsub("(%b{})", "|cff0cd29f%1|r")
     layout:Text(help, true)
 
-    local resetBtn = layout:Button(140, "恢复默认模板", function()
-        DB().announce.templateNoTarget = DEFAULT_TPL_NOTARGET
-        DB().announce.templateTarget = DEFAULT_TPL_TARGET
-        layout:SyncAll()
-        ns.Print("坐标喊话：已恢复默认模板。")
-    end)
-    layout:Button(140, "测试通报一次", function() Announce() end, true, resetBtn)
+
+        end},
+    })
 end
 
 --------------------------------------------------------------------------------
