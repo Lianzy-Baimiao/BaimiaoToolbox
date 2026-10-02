@@ -226,26 +226,25 @@ BaimiaoToolbox
 Baimiao Toolbox
 ~~~
 
-### Summary
+### Summary（英文在上，中文在下）
 
-推荐（概括功能；语言限制在 description 首段披露）：
+复制以下两行；若表单自动合并换行，仍保留英文在前、中文在后。
 
 ~~~text
 Modular tools for Mythic+, quick actions, reminders, coordinates, and party utility.
+大秘境、快捷按钮、状态提醒、坐标喊话与队伍小工具，各模块可独立开关。
 ~~~
 
-备选（在列表中即披露中文界面）：
+### Description（Markdown，完整英文在上，完整中文在下）
 
-~~~text
-A Chinese-language toolbox for Mythic+, quick actions, reminders, and party utility.
-~~~
-
-### Description（Markdown）
+将以下整个代码块内的内容复制到 Description；不要只复制其中一种语言。
 
 ~~~markdown
+## English
+
 BaimiaoToolbox brings a set of independently configurable utility modules to World of Warcraft Retail.
 
-**Language:** The in-game interface is currently available only in Simplified Chinese. There is no English UI translation; this English page explains the addon's features and limitations.
+**Language:** The in-game interface is currently available only in Simplified Chinese. There is no English UI translation; the English section below explains the addon's features and limitations.
 
 ## Features
 
@@ -282,6 +281,50 @@ Issue tracker: https://github.com/Lianzy-Baimiao/BaimiaoToolbox/issues
 Source code: https://github.com/Lianzy-Baimiao/BaimiaoToolbox
 
 Code license: MIT. See LICENSE in the addon package.
+
+---
+
+## 中文说明
+
+白描工具箱是面向魔兽世界正式服的模块化小工具合集，各功能可独立配置和开关。
+
+**界面语言：**目前游戏内仅提供简体中文界面，尚未提供英文界面翻译。
+
+### 功能
+
+- **坐标喊话：**显示坐标、移动速度和目标距离，支持自定义坐标分享消息。
+- **快捷按钮：**集中放置坐骑快捷入口，以及技能、物品、玩具和常用操作按钮。
+- **光环 / 宠物提示：**提醒缺失的光环或宠物，支持自定义提示。
+- **嗜血 / 战复监控：**显示可获取的状态信息和战复次数；可选播放其他插件注册的声音或自定义路径音频。本插件不附带音乐文件。
+- **技能顺序提示：**按职业和专精保存自定义技能顺序，显示冷却信息，并提供三套惩戒骑预设。这是顺序提醒，不是动态输出循环推荐，也不会自动施法。
+- **大秘境信息：**查看副本成绩、本周记录、宏伟宝库进度、队友分享的钥石，以及已学会的副本传送入口。
+- **队伍小工具：**手动公会邀请、多角色选择邀请、目标标记、地面标记、就位确认和原生团队倒数，均遵守游戏权限限制。
+
+### 开始使用
+
+将插件安装到正式服客户端。手动安装时，将 BaimiaoToolbox 文件夹放入 World of Warcraft/_retail_/Interface/AddOns/，确保 BaimiaoToolbox.toc 直接位于该插件文件夹内。
+
+输入 /bm 或点击小地图按钮打开工作台，按需启用模块。功能配置账号共享，界面位置与锁定状态按角色保存。
+
+从 1.9.8 或更早版本升级时，请完全退出并重新进入游戏，以加载新增文件。
+
+### 兼容性与限制
+
+- 仅面向正式服，不支持怀旧服；具体支持版本以文件页面标记为准。
+- 无需安装必需的第三方插件。LibSharedMedia-3.0 为可选集成，本安装包未内嵌该库。
+- 队友钥石依赖兼容插件同步，或当前小队成员分享的钥石链接。插件不能直接查看其他玩家的背包，未取得数据不代表对方没有钥石。
+- 游戏 API 限制可能导致部分信息不可用。受保护操作、队伍权限和战斗限制仍然有效，插件不会绕过这些限制。
+- 音乐功能需要自行配置声音来源，本安装包不含音频文件。
+
+### 反馈与源码
+
+反馈问题时，请附上插件版本、正式服客户端版本、已启用模块、复现步骤及 Lua 报错文本。
+
+问题反馈：https://github.com/Lianzy-Baimiao/BaimiaoToolbox/issues
+
+源代码：https://github.com/Lianzy-Baimiao/BaimiaoToolbox
+
+代码许可证：MIT，详见安装包中的 LICENSE。
 ~~~
 
 ### Changelog（首次 CurseForge 文件，覆盖上一公开版 1.9.8 以来变化）
