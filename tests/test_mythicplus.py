@@ -8,7 +8,7 @@ class MythicTests(unittest.TestCase):
   self.lua=LuaRuntime(unpack_returned_tuples=True)
   for path in ['tests/wow_ui_stub.lua','tests/mythic_stub.lua']:
    self.lua.execute((ROOT/path).read_text(encoding='utf-8'))
-  for path in ['Core.lua','Workspace.lua','Modules/MythicPlusData.lua','Modules/MythicPlus.lua']:
+  for path in ['Core.lua','Workspace.lua','Modules/MythicPlusData.lua','Modules/PartyKeystones.lua','Modules/MythicPlus.lua']:
    self.lua.execute('assert(loadstring(...))("BaimiaoToolbox",ns)',(ROOT/path).read_text(encoding='utf-8'))
   self.runlua('m=ns.modules.mythicplus;d=ns.MythicPlus.GetDB();m.OnEnable();advance();D=ns.MythicPlusData')
  def runlua(self,code):self.lua.execute(code)

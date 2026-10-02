@@ -10,12 +10,12 @@ class WorkspaceTests(unittest.TestCase):
   self.lua=LuaRuntime(unpack_returned_tuples=True)
   self.lua.execute((ROOT/'tests/wow_ui_stub.lua').read_text(encoding='utf-8'))
   self.lua.execute(getattr(self,'initial_lua',''))
-  for path in ['Core.lua','Workspace.lua','Modules/CoordShout.lua','Modules/Reminder.lua','Modules/QuickMount.lua','Modules/RaidCooldowns.lua','Modules/RotationGuide.lua','Modules/MythicPlusData.lua','Modules/MythicPlus.lua']:
+  for path in ['Core.lua','Workspace.lua','Modules/CoordShout.lua','Modules/Reminder.lua','Modules/QuickMount.lua','Modules/RaidCooldowns.lua','Modules/RotationGuide.lua','Modules/MythicPlusData.lua','Modules/PartyKeystones.lua','Modules/MythicPlus.lua','Modules/MarkerAssist.lua','Modules/SmallTools.lua']:
    self.lua.execute('assert(loadstring(...))("BaimiaoToolbox",ns)',(ROOT/path).read_text(encoding='utf-8'))
   self.lua.execute('for _,m in ipairs(ns.orderedModules) do m.db=ns.GetDB(m.id,m.defaults) end; ns.UI.BuildWorkspace()')
  def runlua(self, code):self.lua.execute(code)
  def test_all_real_option_pages_construct(self):
-  self.runlua('assert(#ns.orderedModules==6); assert(#messages==0,table.concat(messages,"; ")); for _,m in ipairs(ns.orderedModules) do assert(m._syncLayout); assert(m._syncLayout.panel:GetHeight()>0) end')
+  self.runlua('assert(#ns.orderedModules==7); assert(#messages==0,table.concat(messages,"; ")); for _,m in ipairs(ns.orderedModules) do assert(m._syncLayout); assert(m._syncLayout.panel:GetHeight()>0) end')
  def test_navigation_and_theme(self):
   self.runlua('''ns.OpenOptions("quickmount"); local w=BaimiaoToolboxWorkspace
   assert(w:IsShown());assert(w.heading:GetText()=="快捷按钮")
@@ -31,7 +31,7 @@ class WorkspaceTests(unittest.TestCase):
   combat=false;w:GetScript("OnEvent")(w,"PLAYER_REGEN_ENABLED");ns.OpenOptions("quickmount");assert(w:IsShown());assert(not w.guard:IsShown())''')
  def test_build_once_and_fit(self):
   self.runlua('''local count=#frames;ns.UI.BuildWorkspace();assert(#frames==count)
-  UIParent:SetSize(1280,720);ns.OpenOptions();assert(BaimiaoToolboxWorkspace:GetScale()<1)
+  UIParent:SetSize(800,600);ns.OpenOptions();assert(BaimiaoToolboxWorkspace:GetScale()<1)
   assert(UISpecialFrames[1]=="BaimiaoToolboxWorkspace")''')
  def test_scroll_clamps_to_content(self):
   self.runlua('''local host=CreateFrame("Frame",nil,UIParent)

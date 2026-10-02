@@ -8,6 +8,8 @@ import sys
 import re
 from PIL import Image, ImageDraw, ImageFont
 from test_mythicplus import MythicTests, ROOT
+from test_party_keystones import STUB as PARTY_STUB
+VERSION = re.search(r"^## Version: (.+)$", (ROOT/"BaimiaoToolbox.toc").read_text(encoding="utf-8"), re.M).group(1)
 
 def main():
     case = MythicTests(); case.setUp()
@@ -24,7 +26,7 @@ def main():
     palette = case.lua.globals().ns.UI.palette
     colors = {key: tuple(round(palette[key][i] * 255) for i in range(1, 4))
               for key in ('bg', 'card', 'border', 'text', 'muted', 'accent', 'hover')}
-    font_path = sys.argv[1] if len(sys.argv) > 1 else 'C:/Windows/Fonts/msyh.ttc'
+    font_path = next((arg for arg in sys.argv[1:] if not arg.startswith('--')), 'C:/Windows/Fonts/msyh.ttc')
     scale = 2
     image = Image.new('RGB', (900*scale, 580*scale), colors['bg'])
     draw = ImageDraw.Draw(image)
@@ -59,7 +61,7 @@ def main():
         draw=ImageDraw.Draw(image)
         ox,oy=40,96
         text(40,20,'大秘境信息优化 · 紧凑布局',24)
-        text(40,57,'v1.9.6 / 布局示意，非游戏截图 / 离线样例，图标为占位',12,'muted')
+        text(40,57,'v'+VERSION+' / 布局示意，非游戏截图 / 离线样例，图标为占位',12,'muted')
         rect((ox,oy,ox+c.w,oy+c.h),'bg')
         def label_at(f,px,py,role='text',right=False):
             value_text=value(f); x=px+f.point[2]; y=py-f.point[3]
@@ -72,6 +74,12 @@ def main():
             label_at(f,ox,oy,role)
         for f in [c.settings,c.refresh]:
             button(ox+f.point[4],oy-f.point[5],f.w,f.h,value(f))
+        for _,row in c.partyRows.items():
+            if row.IsShown(row):
+                x,y=ox+row.point[4],oy-row.point[5]
+                label_at(row.owner,x,y)
+                label_at(row.level,x,y,right=True)
+                label_at(row.dungeon,x,y,'muted')
         for i in range(5):
             x=ox+84+i*32;rect((x,oy+85,x+26,oy+111),'hover')
             text(x+9,oy+90,str(i+1),12,'accent')
@@ -125,6 +133,16 @@ def main():
         target=ROOT/'docs/previews'/filename;target.parent.mkdir(parents=True,exist_ok=True)
         image.save(target);print(target)
 
+    # Four visible teammate rows, with no other anchors changed.
+    case.lua.execute(PARTY_STUB)
+    case.runlua('''party[1].name="这是六字队友";party[2].name="Warriorxxxxx";party[3].name="法师队友名字";party[4].name="牧师队友名字"
+      RAID_CLASS_COLORS={WARRIOR={r=.78,g=.61,b=.43},PALADIN={r=.96,g=.55,b=.73},MAGE={r=.25,g=.78,b=.92},PRIEST={r=1,g=1,b=1}}
+      fire("GROUP_ROSTER_UPDATE")
+      for i=1,4 do fire("CHAT_MSG_ADDON","LibKS",(18-i)..","..mapIDs[i]..",0","PARTY",party[i].name.."-"..party[i].realm)end
+      advance()''')
+    dashboard('mythicplus-party.png')
+    if '--party-only' in sys.argv:return
+    case.runlua('party={};fire("GROUP_ROSTER_UPDATE");advance()')
     dashboard('mythicplus.png')
     case.runlua('c.mapTab:GetScript("OnClick")()')
     dashboard('mythicplus-summary.png')
@@ -141,7 +159,7 @@ def main():
     image = Image.new('RGB', (920*scale, 360*scale), colors['bg'])
     draw = ImageDraw.Draw(image)
     text(24,16,'悬停提示 · 精简双列',22)
-    text(24,49,'v1.9.6 / 离线示意，非游戏截图 / 示例队员',11,'muted')
+    text(24,49,'v'+VERSION+' / 离线示意，非游戏截图 / 示例队员',11,'muted')
     for column, (target, caption) in enumerate([('c.tiles[1]','副本卡片'),('c.rows[2]','本周记录')]):
         detail.runlua(f'{target}:GetScript("OnEnter")({target})')
         tooltip = detail.lua.globals().GameTooltip

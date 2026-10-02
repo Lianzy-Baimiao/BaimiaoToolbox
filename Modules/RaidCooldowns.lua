@@ -49,7 +49,7 @@ local defaults = {
     showRaid = true,    -- 团队时显示
     music = {
         enabled = false,
-        sound = "白描：嗜血球",   -- LSM 声音名；特殊值 "__custom__" = 用下面的自定义路径
+        sound = "__custom__",   -- LSM 声音名；特殊值 "__custom__" = 用下面的自定义路径
         file = "",               -- 自定义路径或 fileDataID（sound 选“自定义”时用）
         channel = "Master",       -- Master/Music/SFX/Ambience/Dialog
         loop = true,             -- 嗜血持续期间循环播放
@@ -58,7 +58,13 @@ local defaults = {
 }
 -- 布局字段（point/relPoint/x/y/locked）从 1.2.0 起存角色档，见 LayoutDB()。
 
-local function DB() return ns.GetDB(MODULE_ID, defaults) end
+local function DB()
+    local d = ns.GetDB(MODULE_ID, defaults)
+    -- The removed bundled selection is no longer a valid sound. Keep user paths
+    -- and all playback preferences; an empty custom path requires a new choice.
+    if d.music.sound == "白描：嗜血球" then d.music.sound = "__custom__" end
+    return d
+end
 -- 布局（位置/锁定）按角色保存；首次访问自动从旧账号档 DB() 迁移。
 local function LayoutDB() return ns.GetLayoutDB(MODULE_ID, DB()) end
 
@@ -267,27 +273,19 @@ local musicHandle
 local musicTicker    -- 循环播放的计时器
 local musicWantedLast = false
 local lastPlayResult, lastPlayAt = "尚未请求", nil
-local BUNDLED_SOUND = "白描：嗜血球"
-local BUNDLED_PATH = "Interface\\AddOns\\BaimiaoToolbox\\media\\lust_ball.ogg"
 
 local SOUND_CHANNELS = { "Master", "Music", "SFX", "Ambience", "Dialog" }
 local CHANNEL_LABEL = {
     Master = "主声道", Music = "音乐", SFX = "音效", Ambience = "环境", Dialog = "对话",
 }
 
--- LibSharedMedia（可选）。把随插件打包的嗜血球注册进去，让它出现在下拉里，
--- 也能读到别的插件注册的所有声音。
+-- LibSharedMedia（可选）：读取其他插件注册的声音，不附带音乐文件。
 local LSM
 local function GetLSM()
     if not LSM then LSM = LibStub and LibStub("LibSharedMedia-3.0", true) end
     return LSM or nil
 end
-local function RegisterBundled()
-    local lsm = GetLSM()
-    if lsm then lsm:Register("sound", BUNDLED_SOUND, BUNDLED_PATH) end
-end
-
--- 下拉可选项：所有 LSM 声音 + “自定义路径”。没装 LSM 时至少给内置那首和自定义。
+-- 下拉可选项：所有 LSM 声音 + “自定义路径”。没装 LSM 时仅提供自定义。
 local function SoundList()
     local out = {}
     local lsm = GetLSM()
@@ -295,8 +293,6 @@ local function SoundList()
         for _, name in ipairs(lsm:List("sound")) do
             out[#out + 1] = { value = name, text = name }
         end
-    else
-        out[#out + 1] = { value = BUNDLED_SOUND, text = BUNDLED_SOUND }
     end
     out[#out + 1] = { value = "__custom__", text = "自定义路径…" }
     return out
@@ -314,8 +310,6 @@ local function ResolveSoundFile()
         local f = lsm:Fetch("sound", m.sound, true)  -- noDefault
         if f then return f end
     end
-    -- 没装 LSM 但选的是内置那首
-    if m.sound == BUNDLED_SOUND then return BUNDLED_PATH end
     return nil
 end
 
@@ -329,7 +323,7 @@ local function PlaySoundOnce(sound, report)
             file = (m.file and m.file ~= "") and (tonumber(m.file) or m.file) or nil
         else
             local lsm = GetLSM()
-            file = (lsm and lsm:Fetch("sound", sound, true)) or (sound == BUNDLED_SOUND and BUNDLED_PATH) or nil
+            file = (lsm and lsm:Fetch("sound", sound, true)) or nil
         end
     else
         file = ResolveSoundFile()
@@ -720,7 +714,6 @@ ns.RegisterModule({
     desc = "两行小图标常驻：嗜血准备就绪/倒计时、战复剩余次数，可选嗜血音乐。",
     defaults = defaults,
     OnEnable = function()
-        RegisterBundled()
         CreateFrameOnce()
         SetupSlash()
         ResetLustSession()

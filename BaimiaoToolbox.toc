@@ -7,7 +7,7 @@
 ## SavedVariables: BaimiaoToolboxDB
 ## SavedVariablesPerCharacter: BaimiaoToolboxDBPC
 ## OptionalDeps: LibSharedMedia-3.0
-## Version: 1.9.8
+## Version: 1.9.14
 ## IconTexture: Interface\AddOns\BaimiaoToolbox\media\cat_icon.tga
 
 Core.lua
@@ -22,4 +22,8 @@ Modules\RaidCooldowns.lua
 Modules\RotationGuide.lua
 
 Modules\MythicPlusData.lua
+Modules\PartyKeystones.lua
 Modules\MythicPlus.lua
+
+Modules\MarkerAssist.lua
+Modules\SmallTools.lua

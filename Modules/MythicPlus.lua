@@ -13,6 +13,9 @@ local active, pending, queued, hooked, kogoHooked=false,false,false,false,nil
 local kogoWasShown=false
 local tiles, affixes, rows, vaults, painters = {},{},{},{},{}
 local page, rowOffset, mode=1,0,"runs"
+local partyRows={}
+local PARTY_NAME_WIDTH=100
+local PARTY_ROW_WIDTH=PARTY_NAME_WIDTH+92
 local lastTeamMapID,lastTeamWeekly
 local W,H=820,422
 local CONTENT_BOTTOM=H-8
@@ -84,7 +87,10 @@ local function tint(display,r,g,b)
     return string.format("|cff%02x%02x%02x%s|r",math.floor(r*255+.5),math.floor(g*255+.5),math.floor(b*255+.5),display)
 end
 local function colored(kind,value,display) return tint(display,D.RarityColor(kind,value)) end
-local function Level(value) return colored("level",value,"+"..(value or 0)) end
+local function Level(value,timed)
+    if timed==false then return tint("+"..(value or 0),unpack(UI.palette.muted)) end
+    return colored("level",value,"+"..(value or 0))
+end
 local function Score(value,kind)
     return value and colored(kind or "mapScore",value,tostring(math.floor(value+.5))) or "—"
 end
@@ -111,9 +117,11 @@ local function AddMembers(lines,members)
     end
 end
 local function AddBest(lines,best,limit)
+    local timed=best.timed
+    if timed==nil then timed=D.Timed(best.duration,limit) end
     local count,named=D.MemberCounts(best.members)
     local suffix=count==1 and "（仅1人资料）" or (named<count and "（姓名不全）" or "")
-    lines[#lines+1]={tint(best.source.."队伍"..suffix,unpack(UI.palette.accent)),Level(best.level).." · "..Points(best.score)}
+    lines[#lines+1]={tint(best.source.."队伍"..suffix,unpack(UI.palette.accent)),Level(best.level,timed).." · "..Points(best.score)}
     lines[#lines+1]="用时 / 限时  "..TimePair({duration=best.duration,limit=limit})
     AddMembers(lines,best.members)
 end
@@ -124,13 +132,13 @@ local function MapLines(map,weekly)
     if best then AddBest(lines,best,map.limit)
     else
         lines[#lines+1]=not map.ratingReady and "赛季成绩待同步"
-            or (map.best>0 and ("赛季 "..Level(map.best).." · "..Points(map.score)) or "赛季未完成")
+            or (map.best>0 and ("赛季 "..Level(map.best,map.bestTimed).." · "..Points(map.score)) or "赛季未完成")
         lines[#lines+1]="暂无最佳队伍信息"
     end
     return lines
 end
 local function RunTooltip(owner,run)
-    local lines={{"本次 "..Level(run.level).." "..TimePair(run).." "..Timed(run),Points(run.score)}}
+    local lines={{"本次 "..Level(run.level,run.timed).." "..TimePair(run).." "..Timed(run),Points(run.score)}}
     lastTeamMapID,lastTeamWeekly=run.id,true
     local best=D.BestDetails(run.id,true)
     if best then lines[#lines+1]=" ";AddBest(lines,best,run.limit)
@@ -225,12 +233,12 @@ local function RenderRows()
         if GameTooltip and GameTooltip:IsOwned(f) then leave() end
         local item=list[rowOffset+i];f.item=item;f.summary=summary;f:SetShown(item~=nil)
         if item then
-            f.left:SetText(summary and item.name or (Level(item.level).."  "..item.name))
+            f.left:SetText(summary and item.name or (Level(item.level,item.timed).."  "..item.name))
             f.time:SetText(summary and "" or TimePair(item))
             f.time:SetShown(not summary)
             f.left:SetWidth(summary and 204 or 150)
             f.right:ClearAllPoints();f.right:SetPoint("TOPLEFT",summary and 212 or 276,-6);f.right:SetWidth(summary and 92 or 28)
-            f.right:SetText(summary and (not snapshot.historyReady and "待同步" or (item.count>0 and (item.count.."次 / "..Level(item.weekly)) or "未完成")) or (item.timed==nil and "未知" or Timed(item)))
+            f.right:SetText(summary and (not snapshot.historyReady and "待同步" or (item.count>0 and (item.count.."次 / "..Level(item.weekly,item.weeklyRun and item.weeklyRun.timed)) or "未完成")) or (item.timed==nil and "未知" or Timed(item)))
             f.right:SetTextColor(unpack(UI.palette[(not summary and item.timed==true) and "accent" or "muted"]))
             if not summary and item.timed==false then f.right:SetTextColor(1,.45,.35) end
         end
@@ -241,6 +249,18 @@ local function RenderRows()
     canvas.runTab.caption:SetText("本周记录  "..#snapshot.runs)
     canvas.mapTab.caption:SetText("副本汇总  "..#snapshot.maps)
     canvas.runTab:UpdateSelection();canvas.mapTab:UpdateSelection()
+end
+local function RenderParty()
+    local members=ns.PartyKeystones and ns.PartyKeystones.Snapshot() or {}
+    for i,f in ipairs(partyRows)do
+        local entry=members[i];f.entry=entry;f:SetShown(entry~=nil)
+        if GameTooltip and GameTooltip:IsOwned(f) then leave()end
+        if entry then
+            f.owner:SetText(tint(entry.shortName,D.ClassColor(entry.class)))
+            f.level:SetText(entry.level and entry.level>0 and Level(entry.level) or "")
+            f.dungeon:SetText(entry.status or D.Map(entry.mapID).name)
+        end
+    end
 end
 local function build()
     host=surface(ChallengesFrame,"bg",true);_G.BaimiaoMythicPanel=host;host:Hide();host:EnableMouse(true)
@@ -258,6 +278,20 @@ local function build()
     canvas.score=label(canvas,"",12,12,62,370,"muted")
     canvas.settings=button(canvas,"设置",66,function()ns.OpenOptions(ID)end)
     canvas.refresh=button(canvas,"刷新",66,function()RequestData();Queue()end)
+    canvas.partyRows=partyRows
+    for i=1,4 do
+        local f=CreateFrame("Frame",nil,canvas);f:SetSize(PARTY_ROW_WIDTH,12);f:EnableMouse(true)
+        f.owner=label(f,"",10,0,0,PARTY_NAME_WIDTH)
+        f.level=label(f,"",10,PARTY_NAME_WIDTH+2,0,24);f.level:SetJustifyH("RIGHT")
+        f.dungeon=label(f,"",10,PARTY_NAME_WIDTH+30,0,62,"muted")
+        f:SetScript("OnEnter",function(self)
+            local e=self.entry;if not e then return end
+            local lines={e.status or (Level(e.level).."  "..D.Map(e.mapID).name)}
+            if e.source then lines[#lines+1]=e.source
+            elseif e.status=="待同步" then lines[#lines+1]="等待兼容插件同步，或队友在小队频道分享钥石链接。"end
+            tip(self,e.name,lines)
+        end);f:SetScript("OnLeave",leave);partyRows[i]=f
+    end
     canvas.affixTitle=label(canvas,"本周词缀",11,12,93,68,"muted")
     for i=1,8 do
         local f=CreateFrame("Button",nil,canvas);f:SetSize(26,26);f:SetPoint("TOPLEFT",84+(i-1)*32,-85)
@@ -331,9 +365,21 @@ Render=function()
     canvas.weekly:SetShown(db.showWeekly)
     place(canvas.settings,leftWidth-114,8,60,24)
     place(canvas.refresh,leftWidth-48,8,60,24)
-    canvas.score:SetWidth(leftWidth-82)
+    -- Grow names leftward; keep the level/dungeon columns and right edge fixed.
+    local partyLeft=leftWidth+12-PARTY_ROW_WIDTH
+    for i,f in ipairs(partyRows)do place(f,partyLeft,36+(i-1)*12,PARTY_ROW_WIDTH,12)end
+    local hasParty=ns.PartyKeystones and #ns.PartyKeystones.Snapshot()>0
+    canvas.score:SetWidth(hasParty and partyLeft-22 or leftWidth-82)
     canvas.key:SetText(snapshot.keyName and ("当前钥石  "..Level(snapshot.keyLevel).."  "..snapshot.keyName) or "当前未持有钥石")
-    canvas.key:SetWidth(leftWidth-4)
+    local keyWidth=hasParty and partyLeft-22 or leftWidth-4
+    local keyFont=STANDARD_TEXT_FONT or GameFontNormal:GetFont()
+    canvas.key:SetFont(keyFont,18,"");canvas.key:SetWidth(0)
+    local naturalWidth=canvas.key:GetStringWidth()
+    if hasParty and naturalWidth>keyWidth then
+        canvas.key:SetFont(keyFont,math.max(14,math.floor(18*keyWidth/naturalWidth)),"")
+    end
+    canvas.key:SetWidth(keyWidth)
+    RenderParty()
     canvas.score:SetText("赛季评分  "..Score(snapshot.rating,"rating"))
     for i,f in ipairs(affixes) do
         f.info=snapshot.affixes[i];f:SetShown(f.info~=nil)
@@ -350,16 +396,16 @@ Render=function()
         if map then
             place(tile,12+((i-1)%2)*(width+8),TILE_TOP+math.floor((i-1)/2)*TILE_PITCH,width,TILE_HEIGHT)
             tile.icon:SetTexture(map.texture or 134400);tile.name:SetText(map.name);tile.name:SetWidth(width-54)
-            local best=db.showBest and (not map.ratingReady and "赛季 —" or (map.best>0 and ("赛季 "..Level(map.best)) or "赛季未完成")) or ""
+            local best=db.showBest and (not map.ratingReady and "赛季 —" or (map.best>0 and ("赛季 "..Level(map.best,map.bestTimed)) or "赛季未完成")) or ""
             local score=db.showScore and ("评分 "..(map.ratingReady and Score(map.score) or "—")) or ""
             tile.stats:SetText(best..(best~="" and score~="" and " · " or "")..score);tile.stats:SetWidth(width-54)
-            tile.week:SetText(snapshot.historyReady and ("本周 "..map.count.." 次"..(map.weekly>0 and (" · "..Level(map.weekly)) or "")) or "本周待同步")
+            tile.week:SetText(snapshot.historyReady and ("本周 "..map.count.." 次"..(map.weekly>0 and (" · "..Level(map.weekly,map.weeklyRun and map.weeklyRun.timed)) or "")) or "本周待同步")
         end
         syncPortal(tile)
     end
     canvas.noMaps:SetShown(#list==0)
     local timed=0;for _,run in ipairs(snapshot.runs) do if run.timed then timed=timed+1 end end
-    canvas.weekStats:SetText(snapshot.historyReady and string.format("完成 %d 次  ·  限时 %d 次  ·  最高 %s",#snapshot.runs,timed,snapshot.runs[1] and Level(snapshot.runs[1].level) or "—") or "正在同步本周记录…")
+    canvas.weekStats:SetText(snapshot.historyReady and string.format("完成 %d 次  ·  限时 %d 次  ·  最高 %s",#snapshot.runs,timed,snapshot.weeklyBest and Level(snapshot.weeklyBest.level,snapshot.weeklyBest.timed) or "—") or "正在同步本周记录…")
     for i,f in ipairs(vaults) do
         local a=snapshot.vault[i]
         f.title:SetText(a and (a.threshold.." 次奖励") or ("宝库槽位 "..i))
@@ -426,6 +472,7 @@ local function hookChallenges()
     if hooked or not ChallengesFrame then return end
     hooked=true
     ChallengesFrame:HookScript("OnShow",function()
+        if ns.PartyKeystones then ns.PartyKeystones.Request()end
         Queue()
         -- Kogo creates its independent panel on a delayed callback. A bounded
         -- discovery window handles that load order; there is no polling ticker.
@@ -447,6 +494,7 @@ RequestData=function()
     if InCombatLockdown() or not Enabled() then return end
     local now=GetTime();if now-lastRequest<3 then return end
     lastRequest=now
+    if ns.PartyKeystones then ns.PartyKeystones.Request()end
     D.Call(C_MythicPlus,"RequestMapInfo");D.Call(C_MythicPlus,"RequestCurrentAffixes");D.Call(C_MythicPlus,"RequestRewards")
 end
 local function ReportTeam()
@@ -461,6 +509,7 @@ local function ReportTeam()
 end
 local registered=false
 local function init()
+    if ns.PartyKeystones then ns.PartyKeystones.Start(Queue,Enabled)end
     if not registered then
         registered=true
         SLASH_BMMYTHICPLUS1="/bmmp"
@@ -529,5 +578,5 @@ end
 ns.MythicPlus={Refresh=Refresh,GetDB=DB,RequestData=RequestData}
 ns.RegisterModule({id=ID,name="大秘境信息优化",desc="副本成绩、本周记录与传送。",
     defaults=defaults,BuildOptions=BuildOptions,OnEnable=init,
-    OnDisable=function()Refresh()end,
+    OnDisable=function()if ns.PartyKeystones then ns.PartyKeystones.Stop()end;Refresh()end,
     OnToggle=function(_,on)if on then init()end;Refresh()end})

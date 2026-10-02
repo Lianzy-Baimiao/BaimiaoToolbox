@@ -2,6 +2,7 @@
 local ADDON, ns = ...
 local UI = ns.UI
 local WHITE = "Interface\\Buttons\\WHITE8x8"
+local WINDOW_WIDTH, WINDOW_HEIGHT = 1000, 660
 local palettes = {
     dark = {
         bg={0.045,0.065,0.080,1}, rail={0.060,0.085,0.100,1},
@@ -85,15 +86,16 @@ local function version()
     return (C_AddOns and C_AddOns.GetAddOnMetadata(ADDON,"Version")) or "1.5.0"
 end
 local descriptions = {
-    coord="坐标、移速与目标距离，按你的模板一键通报。",
-    coordshout="坐标、移速与目标距离，按你的模板一键通报。",
-    quickmount="常用坐骑与扩展动作，在手边有序排列。",
-    reminder="让容易遗忘的光环与宠物准备，一眼可见。",
-    raidcd="关注嗜血与战复，把握团队的关键时刻。",
-    rotation="把技能顺序留在眼前，按你的习惯自由配置。",
-    mythicplus="整合副本成绩、本周记录和手动传送，清晰掌握大秘境进度。",
+    coord="坐标、移速、距离与快捷通报。",
+    coordshout="坐标、移速、距离与快捷通报。",
+    quickmount="常用坐骑与扩展动作。",
+    reminder="光环与宠物准备提醒。",
+    raidcd="嗜血、战复与触发音乐。",
+    rotation="技能循环与冷却提示。",
+    mythicplus="副本成绩、记录与手动传送。",
+    smalltools="右键邀请、标记与团队倒数。",
 }
-local icons={135802,132261,135940,136012,135959,525134}
+local icons={135802,132261,135940,136012,135959,525134,133742}
 local function combatMessage()
     if InCombatLockdown() then
         ns.Print("战斗中暂不修改工具箱配置；请脱战后再试。")
@@ -140,19 +142,19 @@ end
 local function fitWindow()
     if not workspace then return end
     local w,h=UIParent:GetWidth(),UIParent:GetHeight()
-    local scale=math.min(1, (w-32)/1040, (h-32)/740)
+    local scale=math.min(1, (w-32)/WINDOW_WIDTH, (h-32)/WINDOW_HEIGHT)
     workspace:SetScale(math.max(0.35,scale))
 end
 local function navItem(key, label, index)
     local b=CreateFrame("Button",nil,workspace.rail)
-    b:SetSize(178,48); b:SetPoint("TOPLEFT",16,-106-index*56)
+    b:SetSize(168,38); b:SetPoint("TOPLEFT",12,-52-index*44)
     local selection=b:CreateTexture(nil,"BACKGROUND")
     selection:SetAllPoints(); b.selection=selection
     local edge=b:CreateTexture(nil,"ARTWORK")
     edge:SetSize(3,24); edge:SetPoint("LEFT"); b.edge=edge
-    local number=text(b,string.format("%02d",index+1),10,"muted");number:SetPoint("LEFT",14,0)
-    local title=text(b,label,13);title:SetPoint("LEFT",43,0)
-    title:SetWidth(128)
+    local number=text(b,string.format("%02d",index+1),10,"muted");number:SetPoint("LEFT",10,0)
+    local title=text(b,label,13);title:SetPoint("LEFT",38,0)
+    title:SetWidth(120)
     local hover=b:CreateTexture(nil,"HIGHLIGHT");hover:SetAllPoints()
     UI.OnTheme(function()
         selection:SetColorTexture(unpack(UI.palette.hover))
@@ -166,47 +168,49 @@ local function createOverview()
     local host=CreateFrame("Frame",nil,workspace.content)
     host:SetAllPoints(); pages.overview=host
     local home=UI.MakeScrollable(host)
-    local cardWidth=(738-16)/2
-    local footerY=186+math.ceil(#ns.orderedModules/2)*148
-    home:SetHeight(footerY+60)
-    local hero=surface(home,"rail")
-    hero:SetPoint("TOPLEFT",0,0);hero:SetPoint("TOPRIGHT",0,0);hero:SetHeight(132)
-    local kicker=text(hero,"BAIMIAO / FIELD NOTES",10,"accent");kicker:SetPoint("TOPLEFT",22,-20)
-    local title=text(hero,"少一点繁琐，多一点冒险。",23);title:SetPoint("TOPLEFT",22,-44)
-    local subtitle=text(hero,"轻量工具，自由组合。一个属于你的游戏工作台。",12,"muted")
-    subtitle:SetPoint("TOPLEFT",22,-82)
+    -- Keep the original identity/header; density comes from individual cards.
+    local columns,gap=3,12
+    local cardWidth=(738-(columns-1)*gap)/columns
+    local footerY=150+math.ceil(#ns.orderedModules/columns)*112
+    home:SetHeight(footerY+40)
+    local hero=surface(home,"rail");workspace.hero=hero
+    hero:SetPoint("TOPLEFT",0,0);hero:SetPoint("TOPRIGHT",0,0);hero:SetHeight(104)
+    local kicker=text(hero,"BAIMIAO / FIELD NOTES",10,"accent");kicker:SetPoint("TOPLEFT",22,-14)
+    workspace.heroTitle=text(hero,"少一点繁琐，多一点冒险。",23);workspace.heroTitle:SetPoint("TOPLEFT",22,-34)
+    workspace.heroSubtitle=text(hero,"轻量工具，自由组合。一个属于你的游戏工作台。",12,"muted")
+    workspace.heroSubtitle:SetPoint("TOPLEFT",22,-72)
     local cat=hero:CreateTexture(nil,"ARTWORK")
     cat:SetTexture("Interface\\AddOns\\BaimiaoToolbox\\media\\cat_icon.tga")
-    cat:SetSize(78,78);cat:SetPoint("RIGHT",-25,0);cat:SetAlpha(0.7)
-    local section=text(home,"我的工具",16);section:SetPoint("TOPLEFT",0,-154)
-    workspace.summary=text(home,"",12,"muted");workspace.summary:SetPoint("TOPRIGHT",-2,-158)
+    cat:SetSize(70,70);cat:SetPoint("RIGHT",-25,0);cat:SetAlpha(.7)
+    workspace.toolsTitle=text(home,"我的工具",13);workspace.toolsTitle:SetPoint("TOPLEFT",0,-122)
+    workspace.summary=text(home,"",12,"muted");workspace.summary:SetPoint("TOPRIGHT",-2,-123)
     for i,m in ipairs(ns.orderedModules) do
-        local col=(i-1)%2;local row=math.floor((i-1)/2)
+        local col=(i-1)%columns;local row=math.floor((i-1)/columns)
         local card=surface(home)
-        card:SetSize(cardWidth,132);card:SetPoint("TOPLEFT",col*(cardWidth+16),-186-row*148)
+        card:SetSize(cardWidth,104);card:SetPoint("TOPLEFT",col*(cardWidth+gap),-150-row*112)
         local icon=card:CreateTexture(nil,"ARTWORK")
-        icon:SetSize(34,34);icon:SetPoint("TOPLEFT",18,-18)
+        icon:SetSize(30,30);icon:SetPoint("TOPLEFT",14,-10)
         icon:SetTexture(icons[i] or 134400);icon:SetTexCoord(0.08,0.92,0.08,0.92)
-        local name=text(card,m.name or m.id,15);name:SetPoint("TOPLEFT",64,-18)
-        local status=text(card,"",11,"accent");status:SetPoint("TOPLEFT",64,-40)
+        local name=text(card,m.name or m.id,15);name:SetPoint("TOPLEFT",54,-10);name:SetWidth(cardWidth-68)
+        local status=text(card,"",11,"accent");status:SetPoint("TOPLEFT",54,-30)
         m._workspaceStatus=status
-        local desc=text(card,descriptions[m.id] or m.desc or "独立配置，按需启用。",12,"muted")
-        desc:SetPoint("TOPLEFT",18,-64);desc:SetSize(cardWidth-36,22)
-        local configure=button(card,"打开设置",100,function() selectPage(m.id) end)
-        configure:SetPoint("BOTTOMRIGHT",-14,12);configure:SetHeight(28)
-        local toggle=button(card,"",66,function()
+        local desc=text(card,descriptions[m.id] or m.desc or "独立配置，按需启用。",11,"muted")
+        desc:SetPoint("TOPLEFT",14,-48);desc:SetSize(cardWidth-28,16)
+        local configure=button(card,"打开设置",92,function() selectPage(m.id) end)
+        configure:SetPoint("BOTTOMRIGHT",-14,8);configure:SetHeight(26)
+        local toggle=button(card,"",60,function()
             if combatMessage() then return end
             ns.SetModuleEnabled(m.id,not ns.IsModuleEnabled(m.id));refresh()
         end)
-        toggle:SetPoint("BOTTOMLEFT",14,12);toggle:SetHeight(28);m._workspaceToggle=toggle
+        toggle:SetPoint("BOTTOMLEFT",14,8);toggle:SetHeight(26);m._workspaceToggle=toggle
     end
     workspace.minimap=button(home,"",164,function()
         if combatMessage() then return end
         ns.SetMinimapButtonShown(not ns.IsMinimapButtonShown());refresh()
     end)
-    workspace.minimap:SetPoint("TOPLEFT",0,-footerY)
+    workspace.minimap:SetPoint("TOPLEFT",0,-footerY);workspace.minimap:SetHeight(28)
     local hint=text(home,"Alt + 右键屏上工具可直达设置",11,"muted")
-    hint:SetPoint("TOPRIGHT",-2,-footerY-10)
+    hint:SetPoint("TOPRIGHT",-2,-footerY-8)
 end
 -- Slim scrollbars keep the options free of the default gold arrow ornaments.
 -- The scroll child's width never changes when the bar hides, so text stays aligned.
@@ -273,13 +277,13 @@ function UI.BuildWorkspace()
     -- The named escape target is non-secure and never parents gameplay buttons.
     _G.BaimiaoToolboxWorkspace=workspace
     UISpecialFrames[#UISpecialFrames+1]="BaimiaoToolboxWorkspace"
-    workspace:SetSize(1040,740);workspace:SetPoint("CENTER");workspace:SetFrameStrata("DIALOG")
+    workspace:SetSize(WINDOW_WIDTH,WINDOW_HEIGHT);workspace:SetPoint("CENTER");workspace:SetFrameStrata("DIALOG")
     workspace:SetClampedToScreen(true);workspace:EnableMouse(true);workspace:SetMovable(true)
     workspace:Hide()
     local saved=prefs()
     if type(saved.x)=="number" and type(saved.y)=="number" then workspace:SetPoint("CENTER",UIParent,"CENTER",saved.x,saved.y) end
     local drag=CreateFrame("Frame",nil,workspace)
-    drag:SetPoint("TOPLEFT");drag:SetPoint("TOPRIGHT");drag:SetHeight(70)
+    drag:SetPoint("TOPLEFT");drag:SetPoint("TOPRIGHT");drag:SetHeight(52)
     drag:EnableMouse(true);drag:RegisterForDrag("LeftButton")
     drag:SetScript("OnDragStart",function() workspace:StartMoving() end)
     drag:SetScript("OnDragStop",function()
@@ -288,27 +292,26 @@ function UI.BuildWorkspace()
         local ratio=UIParent:GetEffectiveScale()/workspace:GetEffectiveScale()
         prefs().x=x-ux*ratio;prefs().y=y-uy*ratio
     end)
-    local brand=text(drag,"白描工具箱",20);brand:SetPoint("LEFT",24,0)
-    local wordmark=text(drag,"BAIMIAO TOOLBOX  /  "..version(),10,"muted");wordmark:SetPoint("LEFT",brand,"RIGHT",18,-2)
-    local close=button(drag,"关闭",60,function() workspace:Hide() end);close:SetPoint("RIGHT",-20,0)
+    local brand=text(drag,"白描工具箱",20);brand:SetPoint("LEFT",20,0)
+    local wordmark=text(drag,"BAIMIAO TOOLBOX  /  "..version(),10,"muted");wordmark:SetPoint("LEFT",brand,"RIGHT",14,-2)
+    local close=button(drag,"关闭",60,function() workspace:Hide() end);close:SetPoint("RIGHT",-16,0);close:SetHeight(28)
     workspace.theme=button(drag,"",90,function()
         prefs().theme=prefs().theme=="light" and "dark" or "light";applyTheme()
-    end);workspace.theme:SetPoint("RIGHT",close,"LEFT",-10,0)
+    end);workspace.theme:SetPoint("RIGHT",close,"LEFT",-8,0);workspace.theme:SetHeight(28)
     workspace.rail=surface(workspace,"rail")
-    workspace.rail:SetPoint("TOPLEFT",0,-70);workspace.rail:SetPoint("BOTTOMLEFT");workspace.rail:SetWidth(210)
-    local railTitle=text(workspace.rail,"冒险者的随身工具",15);railTitle:SetPoint("TOPLEFT",24,-30)
-    local railSub=text(workspace.rail,"清晰、有序、恰到好处。",11,"muted");railSub:SetPoint("TOPLEFT",24,-57)
-    local railFoot=text(workspace.rail,"/bm  打开工具箱\n拖动顶栏移动窗口\nEsc  关闭",11,"muted")
-    railFoot:SetPoint("BOTTOMLEFT",24,32);railFoot:SetSpacing(8)
-    workspace.eyebrow=text(workspace,"",10,"accent");workspace.eyebrow:SetPoint("TOPLEFT",238,-96)
-    workspace.heading=text(workspace,"",25);workspace.heading:SetPoint("TOPLEFT",238,-117)
+    workspace.rail:SetPoint("TOPLEFT",0,-52);workspace.rail:SetPoint("BOTTOMLEFT");workspace.rail:SetWidth(192)
+    local railTitle=text(workspace.rail,"功能导航",13,"muted");railTitle:SetPoint("TOPLEFT",16,-20)
+    local railFoot=text(workspace.rail,"拖动顶栏移动窗口\n/bm 打开 · Esc 关闭",11,"muted")
+    railFoot:SetPoint("BOTTOMLEFT",16,20);railFoot:SetSpacing(6)
+    workspace.eyebrow=text(workspace,"",10,"accent");workspace.eyebrow:SetPoint("TOPLEFT",208,-60)
+    workspace.heading=text(workspace,"",25);workspace.heading:SetPoint("TOPLEFT",208,-76)
     workspace.toggle=button(workspace,"",188,function()
         local m=workspace.currentModule
         if not m or combatMessage() then return end
         ns.SetModuleEnabled(m.id,not ns.IsModuleEnabled(m.id));refresh()
-    end);workspace.toggle:SetPoint("TOPRIGHT",-28,-116)
+    end);workspace.toggle:SetPoint("TOPRIGHT",-24,-74);workspace.toggle:SetHeight(28)
     workspace.content=CreateFrame("Frame",nil,workspace)
-    workspace.content:SetPoint("TOPLEFT",238,-174);workspace.content:SetPoint("BOTTOMRIGHT",-28,30)
+    workspace.content:SetPoint("TOPLEFT",208,-112);workspace.content:SetPoint("BOTTOMRIGHT",-24,16)
     createOverview();navItem("overview","工作台总览",0)
     for i,m in ipairs(ns.orderedModules) do
         if m.BuildOptions then createModulePage(m);navItem(m.id,m.name or m.id,i) end
@@ -316,7 +319,7 @@ function UI.BuildWorkspace()
     -- An opaque, higher-level guard prevents unsafe edits when combat begins
     -- while settings are open. Theme/close controls remain usable.
     local guard=surface(workspace)
-    guard:SetPoint("TOPLEFT",workspace, "TOPLEFT",211,-71)
+    guard:SetPoint("TOPLEFT",workspace, "TOPLEFT",193,-53)
     guard:SetPoint("BOTTOMRIGHT",workspace,"BOTTOMRIGHT",-1,1)
     guard:SetFrameLevel(workspace:GetFrameLevel()+100);guard:EnableMouse(true);guard:EnableMouseWheel(true)
     guard:SetScript("OnMouseWheel",function() end)

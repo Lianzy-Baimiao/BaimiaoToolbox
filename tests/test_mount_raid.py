@@ -41,6 +41,7 @@ class MountRaidTests(unittest.TestCase):
  def test_hidden_rows_keep_music_polling(self):
   self.runlua('''function IsInRaid() return false end;function IsInGroup() return false end
   local d=ns.GetDB("raidcd");d.showLust=false;d.showBrez=false;d.music.enabled=true;d.music.loop=false
+  d.music.sound="__custom__";d.music.file="test-fixture.ogg"
   local active=false;local played=0;local stopped=0
   C_UnitAuras={GetPlayerAuraBySpellID=function() if active then return {expirationTime=40} end end}
   function PlaySoundFile() played=played+1;return true,123 end

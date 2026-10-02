@@ -21,6 +21,7 @@ class RaidMusicTests(unittest.TestCase):
     local t={interval=interval,fn=fn};function t:Cancel()self.cancelled=true end
     tickers[#tickers+1]=t;return t end
    d=ns.GetDB("raidcd");d.music.enabled=true;d.music.loop=false
+   d.music.sound="__custom__";d.music.file="test-fixture.ogg"
    function tick(dt)now=now+(dt or .3);BaimiaoRaidCDPoll:GetScript("OnUpdate")(BaimiaoRaidCDPoll,dt or .3)end
    function event(name,unit)local f=BaimiaoRaidCDPoll;local fn=f:GetScript("OnEvent");if fn then fn(f,name,unit)end end
    secret=setmetatable({}, {__sub=function()error("secret arithmetic")end,__lt=function()error("secret compare")end})

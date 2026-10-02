@@ -465,33 +465,40 @@ local function BuildOptions(panel,m,layout)
     m.optionTabs=ns.UI.OptionTabs(panel,layout,{
         {name="屏幕显示",width=150,build=function(panel,layout)
     layout:Section("显示")
-    layout:Check("显示坐标", function() return DB().display.coord end,
-        function(v) DB().display.coord = v end, Refresh)
-    layout:Check("显示移速", function() return DB().display.speed end,
-        function(v) DB().display.speed = v end, Refresh)
-    layout:Check("显示距离（到当前目标的范围区间）", function() return DB().display.distance end,
-        function(v) DB().display.distance = v end, Refresh)
-    layout:Check("锁定位置（锁定后隐藏背景、不能拖动；Alt+左键仍可拖）", function() return L().locked end,
-        function(v) L().locked = v end, Refresh)
-    layout:Check("轮廓字体", function() return DB().display.outline end,
-        function(v) DB().display.outline = v end, Refresh)
-
-    layout:ColorSwatch("坐标颜色",
-        function() local c = DB().display.coordColor return c.r, c.g, c.b end,
-        function(r, g, b) DB().display.coordColor = { r = r, g = g, b = b } end, Refresh)
-    layout:ColorSwatch("移速颜色",
-        function() local c = DB().display.speedColor return c.r, c.g, c.b end,
-        function(r, g, b) DB().display.speedColor = { r = r, g = g, b = b } end, Refresh)
-    layout:ColorSwatch("距离颜色",
-        function() local c = DB().display.distColor return c.r, c.g, c.b end,
-        function(r, g, b) DB().display.distColor = { r = r, g = g, b = b } end, Refresh)
-
-    layout:Slider("BaimiaoCoordShoutFontSlider", "字号", 10, 40, 1,
-        function() return DB().display.fontSize or 16 end,
-        function(v) DB().display.fontSize = v end, Refresh)
-    layout:Slider("BaimiaoCoordShoutScaleSlider", "整体缩放（%）", 50, 200, 5,
-        function() return (DB().display.scale or 1)*100 end,
-        function(v) DB().display.scale = v/100 end, Refresh)
+    layout:Row({
+        function(cell) cell:Check("显示坐标", function() return DB().display.coord end,
+            function(v) DB().display.coord = v end, Refresh) end,
+        function(cell) cell:Check("显示移速", function() return DB().display.speed end,
+            function(v) DB().display.speed = v end, Refresh) end,
+        function(cell) cell:Check("显示目标距离", function() return DB().display.distance end,
+            function(v) DB().display.distance = v end, Refresh) end,
+    })
+    layout:Row({
+        function(cell) cell:Check("锁定位置（Alt+左键可拖动）", function() return L().locked end,
+            function(v) L().locked = v end, Refresh) end,
+        function(cell) cell:Check("轮廓字体", function() return DB().display.outline end,
+            function(v) DB().display.outline = v end, Refresh) end,
+    })
+    layout:Row({
+        function(cell) cell:ColorSwatch("坐标颜色",
+            function() local c = DB().display.coordColor return c.r, c.g, c.b end,
+            function(r, g, b) DB().display.coordColor = { r = r, g = g, b = b } end, Refresh) end,
+        function(cell) cell:ColorSwatch("移速颜色",
+            function() local c = DB().display.speedColor return c.r, c.g, c.b end,
+            function(r, g, b) DB().display.speedColor = { r = r, g = g, b = b } end, Refresh) end,
+        function(cell) cell:ColorSwatch("距离颜色",
+            function() local c = DB().display.distColor return c.r, c.g, c.b end,
+            function(r, g, b) DB().display.distColor = { r = r, g = g, b = b } end, Refresh) end,
+    })
+    layout:step(8)
+    layout:Row({
+        function(cell) cell:Slider("BaimiaoCoordShoutFontSlider", "字号", 10, 40, 1,
+            function() return DB().display.fontSize or 16 end,
+            function(v) DB().display.fontSize = v end, Refresh) end,
+        function(cell) cell:Slider("BaimiaoCoordShoutScaleSlider", "整体缩放（%）", 50, 200, 5,
+            function() return (DB().display.scale or 1)*100 end,
+            function(v) DB().display.scale = v/100 end, Refresh) end,
+    }, 260)
 
 
         end},

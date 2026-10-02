@@ -351,6 +351,28 @@ function ns.UI.NewLayout(panel)
 
     function L:step(dy) self.y = self.y - (dy or 26) end
 
+    -- Equal-width cells for flat controls. Each cell keeps its own cursor and
+    -- shares sync callbacks; wrapped labels advance the row by the tallest cell.
+    -- Narrow panels wrap cells instead of overlapping adjacent click regions.
+    function L:Row(builders, minCellWidth)
+        if #builders == 0 then return end
+        local gap = 16
+        local available = self._cellWidth or math.max(1, self.panel:GetWidth() - self.indent - 24)
+        local columns = math.max(1, math.min(#builders, math.floor((available + gap) / ((minCellWidth or 180) + gap))))
+        local width = (available - gap * (columns - 1)) / columns
+        for first = 1, #builders, columns do
+            local top, bottom = self.y, self.y
+            for i = first, math.min(first + columns - 1, #builders) do
+                local cell = setmetatable({panel=self.panel, y=top,
+                    indent=self.indent+(i-first)*(width+gap), _cellWidth=width,
+                    syncers=self.syncers}, {__index=self})
+                builders[i](cell)
+                bottom = math.min(bottom, cell.y)
+            end
+            self.y = bottom
+        end
+    end
+
     -- 刷新所有控件的显示值。
     -- 关键：逐个 pcall 隔离——以前一个控件报错会让后面的控件全部拿不到值
     --（表现就是滑块右边的数值框一片空白）。现在出错只跳过它自己并提示一次。
@@ -438,21 +460,54 @@ function ns.UI.NewLayout(panel)
         return fs
     end
 
+    -- Native CheckButton behavior, but no Blizzard checkbox/checkmark artwork.
+    -- The square thumb position plus track color distinguish on/off in both themes.
     function L:Check(label, getter, setter, onChange)
-        local cb = CreateFrame("CheckButton", nil, self.panel, "UICheckButtonTemplate")
-        cb:SetSize(24, 24)
+        local cb = CreateFrame("CheckButton", nil, self.panel, "BackdropTemplate")
+        cb:SetSize(26, 14)
         cb:SetPoint("TOPLEFT", self.indent, self.y)
+        cb:RegisterForClicks("LeftButtonUp")
+        cb:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
+        local thumb=cb:CreateTexture(nil,"ARTWORK")
+        thumb:SetSize(8,8);cb.thumb=thumb
         local fs = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        fs:SetPoint("TOPLEFT", cb, "TOPRIGHT", 8, -4)
-        fs:SetWidth(math.max((self.panel:GetWidth() or 600) - self.indent - 62, 180))
+        fs:SetFont(GameFontNormal:GetFont(),13,"")
+        fs:SetPoint("TOPLEFT", cb, "TOPRIGHT", 8, 0)
+        fs:SetWidth(self._cellWidth and math.max(1, self._cellWidth - 34)
+            or math.max((self.panel:GetWidth() or 600) - self.indent - 58, 100))
         fs:SetJustifyH("LEFT")
         fs:SetWordWrap(true)
-        fs:SetText(label)
+        fs:SetText(label);cb.label=fs
+        if ns.UI.StyleText then ns.UI.StyleText(fs,"text") end
+        local hovered=false
+        local function paint()
+            local p=ns.UI.palette or {rail={.06,.085,.10,1},bg={.045,.065,.08,1},
+                accent={.40,.82,.69,1},muted={.57,.67,.69,1},border=SKIN_BORDER}
+            local checked=cb:GetChecked()
+            cb:SetBackdropColor(unpack(checked and p.accent or p.rail))
+            cb:SetBackdropBorderColor(unpack((checked or hovered) and p.accent or p.border))
+            thumb:SetColorTexture(unpack(checked and p.bg or p.muted))
+            thumb:ClearAllPoints();thumb:SetPoint("LEFT",cb,"LEFT",checked and 15 or 3,0)
+            cb:SetAlpha(cb:IsEnabled() and 1 or .45)
+        end
+        local function sync()
+            cb:SetChecked(getter() and true or false)
+            -- Include wrapped labels in the click area without overlapping the next row.
+            cb:SetHitRectInsets(0,-fs:GetWidth()-8,-2,-math.max(2,fs:GetStringHeight()-14))
+            paint()
+        end
         cb:SetScript("OnClick", function(self2)
+            if not self2:IsEnabled() or InCombatLockdown() then sync();return end
             setter(self2:GetChecked() and true or false)
             if onChange then onChange() end
+            sync()
         end)
-        self.syncers[#self.syncers + 1] = function() cb:SetChecked(getter() and true or false) end
+        cb:SetScript("OnEnter",function() hovered=true;paint() end)
+        cb:SetScript("OnLeave",function() hovered=false;paint() end)
+        cb:SetScript("OnEnable",paint);cb:SetScript("OnDisable",paint)
+        cb:SetScript("OnHide",function() hovered=false;paint() end)
+        self.syncers[#self.syncers + 1] = sync
+        if ns.UI.OnTheme then ns.UI.OnTheme(paint) else paint() end
         self:step(math.max(32, fs:GetStringHeight() + 12))
         return cb
     end
@@ -658,7 +713,7 @@ function ns.UI.NewLayout(panel)
             return n
         end
 
-        local TRACK_W = 210
+        local TRACK_W = self._cellWidth and math.max(80, math.min(210, self._cellWidth - 130)) or 210
         local KNOB_COLOR = { 0.05, 0.83, 0.62 }
         local KNOB_HOVER = { 0.20, 1.00, 0.78 }
 

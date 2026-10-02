@@ -10,3 +10,6 @@ Thumbs.db
 # Offline test artifacts
 __pycache__/
 *.py[cod]
+
+# Private audio must never be added to the distribution again.
+/media/lust_ball.ogg

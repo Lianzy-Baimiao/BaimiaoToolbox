@@ -121,3 +121,10 @@ function methods:SetAttribute(key,value)
 end
 function methods:SetDrawBling() end
 function methods:RegisterForClicks(...) self.clicks={...} end
+
+-- Presentation properties used by shared rectangular-switch regressions.
+function methods:IsEnabled() return self.enabled~=false end
+function methods:SetBackdropColor(...) self.backdropColor={...} end
+function methods:SetBackdropBorderColor(...) self.backdropBorder={...} end
+function methods:SetHitRectInsets(...) self.hitInsets={...} end
+function methods:SetAlpha(value) self.alpha=value end

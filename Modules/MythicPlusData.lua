@@ -17,6 +17,11 @@ local function public(v) return not (issecretvalue and issecretvalue(v)) end
 function D.Number(v)
     if public(v) and type(v)=="number" and v==v and v~=math.huge and v~=-math.huge then return v end
 end
+-- A missing or restricted time is unknown, not an overtime completion.
+function D.Timed(duration,limit)
+    duration,limit=D.Number(duration),D.Number(limit)
+    if duration and duration>0 and limit and limit>0 then return duration<=limit end
+end
 local function call(api, name, ...)
     local fn=api and api[name]
     if type(fn)~="function" then return end
@@ -117,7 +122,7 @@ local function membersCopy(value)
     end
     return result
 end
-local function bestCopy(value,source)
+local function bestCopy(value,source,timed)
     if not plainTable(value) then return end
     local level,duration=D.Number(value.level),D.Number(value.durationSec)
     if not level or level<=0 then return end
@@ -126,7 +131,7 @@ local function bestCopy(value,source)
         for _,id in ipairs(value.affixIDs) do if D.Number(id) then affixIDs[#affixIDs+1]=id end end
     end
     return {level=level,duration=duration,date=dateCopy(value.completionDate),score=D.Number(value.dungeonScore),
-        members=membersCopy(value.members),affixIDs=affixIDs,source=source}
+        members=membersCopy(value.members),affixIDs=affixIDs,source=source,timed=timed}
 end
 -- Called only when hovering. Weekly history has no roster; best APIs do.
 function D.MapDetails(id)
@@ -135,8 +140,8 @@ function D.MapDetails(id)
     local weekly=bestCopy({durationSec=duration,level=level,completionDate=date,affixIDs=affixes,members=members,dungeonScore=score},"本周最佳")
     if weekly then result[#result+1]=weekly end
     local intime,overtime=call(C_MythicPlus,"GetSeasonBestForMap",id)
-    for _,pair in ipairs({{intime,"赛季限时最佳"},{overtime,"赛季超时最佳"}}) do
-        local best=bestCopy(pair[1],pair[2]);if best then result[#result+1]=best end
+    for _,pair in ipairs({{intime,"赛季限时最佳",true},{overtime,"赛季超时最佳",false}}) do
+        local best=bestCopy(pair[1],pair[2],pair[3]);if best then result[#result+1]=best end
     end
     return result
 end
@@ -169,6 +174,13 @@ function D.BestDetails(id,preferWeekly)
     end
     return chosen,candidates
 end
+-- Aggregate the highest level without discarding its timing. At equal levels,
+-- prefer timed, then unknown, then overtime; history display order is unchanged.
+local function preferRun(candidate,current)
+    if not current or candidate.level~=current.level then return not current or candidate.level>current.level end
+    local function rank(timed) return timed==true and 2 or (timed==nil and 1 or 0) end
+    return rank(candidate.timed)>rank(current.timed)
+end
 function D.Snapshot()
     local result={maps={},byMap={},runs={},vault={},affixes={}}
     local maps=call(C_ChallengeMode,"GetMapTable")
@@ -186,7 +198,11 @@ function D.Snapshot()
         for _,run in ipairs(type(summary.runs)=="table" and summary.runs or {}) do
             local id=D.Number(run.challengeModeID)
             local map=id and result.byMap[id]
-            if map then map.best=D.Number(run.bestRunLevel) or 0;map.score=D.Number(run.mapScore) or 0 end
+            if map then
+                map.best=D.Number(run.bestRunLevel) or 0;map.score=D.Number(run.mapScore) or 0
+                local ms=D.Number(run.bestRunDurationMS)
+                map.bestTimed=D.Timed(ms and ms/1000,map.limit)
+            end
         end
     end
     local history=call(C_MythicPlus,"GetRunHistory",false,true,true)
@@ -199,11 +215,13 @@ function D.Snapshot()
             local timed
             -- Use elapsed time vs the map's limit. Do not guess the meaning of
             -- `completed`, or label unknown/restricted timings as failed runs.
-            if duration and duration>0 and map.limit and map.limit>0 then timed=duration<=map.limit end
+            timed=D.Timed(duration,map.limit)
             local entry={id=id,name=map.name,level=level,timed=timed,duration=duration,limit=map.limit,index=index,
                 date=dateCopy(run.completionDate),score=D.Number(run.runScore)}
             result.runs[#result.runs+1]=entry
             map.count=map.count+1;map.weekly=math.max(map.weekly,level)
+            if preferRun(entry,map.weeklyRun) then map.weeklyRun=entry end
+            if preferRun(entry,result.weeklyBest) then result.weeklyBest=entry end
             if timed then map.timed=map.timed+1 end
         end
     end
