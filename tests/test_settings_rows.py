@@ -89,10 +89,11 @@ class SettingsRowTests(unittest.TestCase):
     function(cell)h[2]=cell:Slider("CompactSliderB","B",1,10,1,function()return 5 end,function()end)end},260)
    assert(h[1].point[2]==h[2].point[2] and h[2].point[3]<h[1].point[3])
    for _,f in ipairs(h)do assert(f.point[2]+f:GetWidth()<=p:GetWidth()-24)end''')
- def test_readme_is_minimal_without_images_icons_or_version_log(self):
+ def test_readme_stays_minimal_with_author_supplied_preview(self):
   text=(Path(__file__).resolve().parents[1]/'README.md').read_text(encoding='utf-8')
   self.assertLessEqual(len(text.splitlines()),35)
-  for forbidden in ('![','<img','CHANGELOG','更新日志','1.9.','⚠','📍','⏱'):
+  # The author added a real preview after release; images are allowed now.
+  for forbidden in ('CHANGELOG','更新日志','1.9.','⚠','📍','⏱'):
    self.assertNotIn(forbidden,text)
   for feature in ('坐标喊话','快捷按钮','光环 / 宠物提示','嗜血 / 战复监控','技能顺序','大秘境','小工具集合'):
    self.assertIn(feature,text)
