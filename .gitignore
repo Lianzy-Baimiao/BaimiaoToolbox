@@ -13,3 +13,10 @@ __pycache__/
 
 # Private audio must never be added to the distribution again.
 /media/lust_ball.ogg
+
+# Development notes and offline tests stay local.
+/tests/
+/docs/*
+!/docs/previews/
+/docs/previews/*
+!/docs/previews/BAIMIAOTOOLBOX.png
