@@ -1,6 +1,6 @@
 # 白描工具箱：CurseForge 发布核查与填写清单
 
-核查日期：2026-10-03（Asia/Shanghai）  
+核查日期：2026-10-03（Asia/Shanghai）
 项目：白描工具箱 / BaimiaoToolbox；面向 World of Warcraft 正式服，中文 UI，代码许可证 MIT。
 
 ## 1. 结论与研究边界
