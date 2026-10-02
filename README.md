@@ -11,6 +11,8 @@
 - **技能顺序**：查看惩戒骑单体与群体技能顺序。
 - **大秘境信息**：副本成绩、本周记录、宝库进度、队友钥石和副本传送。
 - **小工具集合**：右键公会邀请、多角色选择邀请、标记助手和团队倒数。
+  
+![首页预览](https://github.com/Lianzy-Baimiao/BaimiaoToolbox/blob/main/docs/previews/BAIMIAOTOOLBOX.png)
 
 ## 安装与使用
 
