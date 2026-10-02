@@ -91,8 +91,9 @@ local descriptions = {
     reminder="让容易遗忘的光环与宠物准备，一眼可见。",
     raidcd="关注嗜血与战复，把握团队的关键时刻。",
     rotation="把技能顺序留在眼前，按你的习惯自由配置。",
+    mythicplus="整合副本成绩、本周记录和手动传送，清晰掌握大秘境进度。",
 }
-local icons={135802,132261,135940,136012,135959}
+local icons={135802,132261,135940,136012,135959,525134}
 local function combatMessage()
     if InCombatLockdown() then
         ns.Print("战斗中暂不修改工具箱配置；请脱战后再试。")

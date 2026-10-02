@@ -11,7 +11,8 @@ local ADDON, ns = ...
 --   战复共享池 = Rebirth(20484) 的充能：C_Spell.GetSpellCharges
 --   注意：共享池只认「充能」。用「不在冷却 = 1 次」那种兜底会让自己不会战复的职业
 --   （武僧等）也读出 1 次 —— 因为 GetSpellCooldown(20484) 对不会这法术的人同样有数据。
---   嗜血/沙 的法术、疲惫 debuff id 均为“非秘密”，GetPlayerAuraBySpellID 战斗中也能读。
+--   12.x 战斗中嗜血增益可能返回空值；只用公开的“新获得疲惫”作约 40 秒备用判定。
+--   不读取秘密字段，不把带入副本的旧疲惫当成一次新嗜血。
 --------------------------------------------------------------------------------
 
 local MODULE_ID = "raidcd"
@@ -65,32 +66,115 @@ local function LayoutDB() return ns.GetLayoutDB(MODULE_ID, DB()) end
 -- 数据
 --------------------------------------------------------------------------------
 
--- 返回：状态字符串, 颜色{r,g,b}。三态：正在嗜血 / 冷却中(沙) / 准备就绪。
-local function GetLustState()
-    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then
-        return "准备就绪", { 0.2, 1, 0.4 }
-    end
-    -- 正在嗜血中？
-    for _, sid in ipairs(LUST_SPELLS) do
+-- present: 1=公开可见，0=查询成功且未找到，-1=未知（失败/秘密值）。
+-- 嗜血增益的 0 在受限战斗中并不保证真的不存在；疲惫仅用于观察新获得的边沿。
+local function IsSecret(value)
+    return issecretvalue and issecretvalue(value)
+end
+
+local function ReadAuras(ids, now)
+    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return -1 end
+    local missing = 0
+    for _, sid in ipairs(ids) do
         local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
-        if ok and aura and aura.expirationTime then
-            local left = aura.expirationTime - GetTime()
-            if left > 0 then
-                return ("嗜血中 %.0f秒"):format(left), { 1, 0.85, 0.1 }
+        if not ok or IsSecret(aura) then
+            missing = -1
+        elseif aura then
+            local exp = aura.expirationTime
+            -- 已知 ID 对应的公开 aura 即足以确认存在；不比较/格式化秘密时间。
+            if IsSecret(exp) or type(exp) ~= "number" or exp == 0 then return 1 end
+            if exp > now then
+                local duration = aura.duration
+                local start
+                if not IsSecret(duration) and type(duration) == "number" and duration > 0 then
+                    start = exp - duration
+                end
+                return 1, exp, start
             end
         end
     end
-    -- 处于沙（冷却）？
-    for _, sid in ipairs(SATED_DEBUFFS) do
-        local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
-        if ok and aura and aura.expirationTime then
-            local left = aura.expirationTime - GetTime()
-            if left > 0 then
-                local m = math.floor(left / 60)
-                local s = math.floor(left % 60)
-                return ("冷却 %d:%02d"):format(m, s), { 0.75, 0.75, 0.75 }
-            end
+    return missing
+end
+
+local GUESS_DURATION = 40
+local satedPrevious, guessUntil, guessContext
+local worldLeaving = false
+local lustState = { active = false }
+local lastTriggerSource, lastTriggerAt
+
+local function ResetLustTracking()
+    satedPrevious, guessUntil, guessContext = nil, nil, nil
+    lustState = { active = false }
+end
+
+-- 备用窗口只在副本内有效；野外只认真实可读的增益，不能由疲惫推断正在嗜血。
+local function GuessContext()
+    if worldLeaving or not IsInInstance then return end
+    local ok, inside, kind = pcall(IsInInstance)
+    if not ok or IsSecret(inside) or IsSecret(kind) then return end
+    if inside == true and (kind == "party" or kind == "raid") then return kind end
+end
+
+local function SampleLust()
+    if worldLeaving then
+        lustState = { active = false }
+        return lustState
+    end
+    local now = GetTime()
+    local context = GuessContext()
+    if guessContext ~= context then
+        -- 不依赖世界事件一定早于下一次轮询：出本立即清除推定，进本重新建基线。
+        satedPrevious, guessUntil = nil, nil
+        guessContext = context
+    end
+    local sated, satedExp, satedStart = ReadAuras(SATED_DEBUFFS, now)
+    local freshSated = satedPrevious == 0 and sated == 1
+    -- 首次采样只建立基线；未知采样也会打断“确认没有 -> 新出现”的证据链。
+    satedPrevious = sated
+    local dead = UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")
+    if dead or not context or sated == 0 then guessUntil = nil end
+    -- 公开时间能证明是旧疲惫时，不把过图/同步后晚到的数据认作新施放。
+    local recent = not satedStart or math.abs(now - satedStart) <= 2
+    if freshSated and not dead and context and recent then
+        guessUntil = math.min(now, satedStart or now) + GUESS_DURATION
+    end
+    if guessUntil and guessUntil <= now then guessUntil = nil end
+
+    local state = { active = false, sated = sated, satedExp = satedExp }
+    if not dead then
+        local buff, buffExp = ReadAuras(LUST_SPELLS, now)
+        if buff == 1 then
+            state.active, state.endsAt, state.source = true, buffExp, "嗜血增益"
+            -- 读得到实际结束时间时缩短备用窗口，不把推定计时延长到真实增益之后。
+            if guessUntil and buffExp then guessUntil = math.min(guessUntil, buffExp) end
+        elseif guessUntil then
+            state.active, state.endsAt, state.source = true, guessUntil, "新疲惫推定"
+            state.estimated = true
         end
+    end
+    if state.active and not lustState.active then
+        lastTriggerSource, lastTriggerAt = state.source, now
+    end
+    lustState = state
+    return state
+end
+
+local function GetLustDisplay(state)
+    if state.active then
+        local text = "嗜血中"
+        if state.endsAt then
+            text = (state.estimated and "嗜血中 约%.0f秒" or "嗜血中 %.0f秒"):format(
+                math.max(0, state.endsAt - GetTime()))
+        end
+        return text, { 1, 0.85, 0.1 }
+    elseif state.sated == 1 then
+        if state.satedExp then
+            local left = math.max(0, state.satedExp - GetTime())
+            return ("冷却 %d:%02d"):format(math.floor(left / 60), math.floor(left % 60)), { 0.75, 0.75, 0.75 }
+        end
+        return "冷却中", { 0.75, 0.75, 0.75 }
+    elseif state.sated == -1 then
+        return "状态暂不可读", { 0.75, 0.75, 0.75 }
     end
     return "准备就绪", { 0.2, 1, 0.4 }
 end
@@ -181,6 +265,8 @@ end
 
 local musicHandle
 local musicTicker    -- 循环播放的计时器
+local musicWantedLast = false
+local lastPlayResult, lastPlayAt = "尚未请求", nil
 local BUNDLED_SOUND = "白描：嗜血球"
 local BUNDLED_PATH = "Interface\\AddOns\\BaimiaoToolbox\\media\\lust_ball.ogg"
 
@@ -193,7 +279,7 @@ local CHANNEL_LABEL = {
 -- 也能读到别的插件注册的所有声音。
 local LSM
 local function GetLSM()
-    if LSM == nil then LSM = (LibStub and LibStub("LibSharedMedia-3.0", true)) or false end
+    if not LSM then LSM = LibStub and LibStub("LibSharedMedia-3.0", true) end
     return LSM or nil
 end
 local function RegisterBundled()
@@ -233,10 +319,8 @@ local function ResolveSoundFile()
     return nil
 end
 
--- 播放指定声音一次；成功返回 handle。sound 传具体值（用于试听下拉里的某项），
--- 不传则用当前设置。
--- report=true 只在【失败】时提示——成功是能听见的，不需要刷屏
---（以前悬停下拉列表会每项打印一句"已播放"，滑一遍就刷屏）。
+-- 播放一次并返回 handle、请求结果；客户端接受请求不等于玩家一定能听见。
+-- sound 不传则用当前设置；report 仅供主动点“试听”反馈，悬停/自动播放不刷屏。
 local function PlaySoundOnce(sound, report)
     local m = DB().music
     local file
@@ -252,22 +336,22 @@ local function PlaySoundOnce(sound, report)
     end
     if not file then
         if report then ns.Print("嗜血音乐：没选到有效的声音（自定义模式请填路径/fileDataID）。") end
-        return nil
+        return nil, "声音资源未找到"
     end
     local ok, willPlay, handle = pcall(PlaySoundFile, file, m.channel or "Master")
     if ok and willPlay then
         -- report=true 的调用点（点“试听”按钮）给一次确认；
         -- 悬停下拉试听传 false，避免滑一遍列表就刷屏。
         if report then
-            ns.Print("嗜血音乐：已播放（" .. (CHANNEL_LABEL[m.channel] or m.channel or "?") .. "）。")
+            ns.Print("嗜血音乐：已请求播放（" .. (CHANNEL_LABEL[m.channel] or m.channel or "?") .. "）。")
         end
-        return handle
+        return handle, "客户端已接受请求（不代表一定可听见）"
     end
     if report then
         ns.Print("嗜血音乐：播放失败。自定义音频请放进插件目录用 " ..
             "Interface\\AddOns\\...\\xxx.ogg 路径（游戏启动后临时丢进 Interface\\Music 的常读不到），或改用 fileDataID。")
     end
-    return nil
+    return nil, ok and "客户端拒绝播放" or "播放接口调用失败"
 end
 
 -- 停止：取消循环计时器 + 停当前音。
@@ -279,23 +363,77 @@ end
 -- 试听：只放一次，不循环。report=true（点“试听”按钮）会回报一次；
 -- 悬停下拉试听走 false，静默播放——听得见就是反馈，不再刷屏。
 local function PreviewMusic(sound, report)
-    if musicHandle then pcall(StopSound, musicHandle) end
+    StopLustMusic()
     musicHandle = PlaySoundOnce(sound, report)
 end
 
--- 嗜血触发时调用：受“启用”开关控制。可循环，直到 StopLustMusic。
+local function WantsMusic()
+    return ns.IsModuleEnabled(MODULE_ID) and DB().enabled and DB().music.enabled and lustState.active
+        and (not lustState.estimated or GuessContext() ~= nil)
+end
+
+local function PlayAutomaticOnce()
+    musicHandle, lastPlayResult = PlaySoundOnce(nil, false)
+    lastPlayAt = GetTime()
+end
+
 local function PlayLustMusic()
     local m = DB().music
-    if not m.enabled then return end
-    StopLustMusic()  -- 清掉上一轮
-    musicHandle = PlaySoundOnce(nil, false)
+    StopLustMusic()
+    PlayAutomaticOnce()
     if m.loop then
-        local interval = tonumber(m.loopInterval) or 3
-        if interval < 1 then interval = 1 end
+        local interval = math.max(1, tonumber(m.loopInterval) or 3)
         musicTicker = C_Timer.NewTicker(interval, function()
+            if not WantsMusic() or not DB().music.loop
+                or (lustState.endsAt and GetTime() >= lustState.endsAt)
+                or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) then
+                StopLustMusic()
+                return
+            end
             if musicHandle then pcall(StopSound, musicHandle) end
-            musicHandle = PlaySoundOnce(nil, false)
+            PlayAutomaticOnce()
         end)
+    end
+end
+
+-- 音乐由状态驱动，与文字/场景可见性无关。主动“停止”或试听不会在下一帧被抢回。
+local function SyncLustMusic()
+    local wanted = WantsMusic() and true or false
+    if wanted and not musicWantedLast then
+        PlayLustMusic()
+    elseif not wanted and musicWantedLast then
+        StopLustMusic()
+    end
+    musicWantedLast = wanted
+end
+
+local function ResetLustSession()
+    StopLustMusic()
+    musicWantedLast = false
+    ResetLustTracking()
+end
+
+-- 只在用户请求时输出，自动检测失败不刷屏；保留本次登录最近一次自动触发/请求。
+local function ReportMusic()
+    local m = DB().music
+    local text = GetLustDisplay(lustState)
+    ns.Print("嗜血音乐：模块" .. ((ns.IsModuleEnabled(MODULE_ID) and DB().enabled) and "开" or "关") ..
+        " / 自动" .. (m.enabled and "开" or "关") .. " / " .. (CHANNEL_LABEL[m.channel] or "主声道") ..
+        "；当前：" .. text .. "。")
+    local trigger = lastTriggerSource and (lastTriggerSource .. ("（%.0f秒前）"):format(GetTime() - lastTriggerAt)) or "未检测到"
+    local result = lastPlayResult .. (lastPlayAt and ("（%.0f秒前）"):format(GetTime() - lastPlayAt) or "")
+    ns.Print("上次触发：" .. trigger .. "；自动播放：" .. result .. "。")
+    ns.Print("声音：" .. (m.sound or "未选择") .. "；资源" .. (ResolveSoundFile() and "已解析" or "未找到") .. "。")
+    if GetCVar then
+        local channel = m.channel or "Master"
+        local function Setting(name)
+            local ok, value = pcall(GetCVar, name)
+            if not ok or IsSecret(value) or value == nil or value == "" then return "?" end
+            return tostring(value)
+        end
+        local enabled = channel == "Master" and "Sound_EnableAllSound" or "Sound_Enable" .. channel
+        ns.Print("声音设置：总开关=" .. Setting("Sound_EnableAllSound") .. " / 总音量=" .. Setting("Sound_MasterVolume") ..
+            " / 声道开关=" .. Setting(enabled) .. " / 声道音量=" .. Setting("Sound_" .. channel .. "Volume") .. "。")
     end
 end
 
@@ -304,7 +442,6 @@ end
 --------------------------------------------------------------------------------
 
 local frame
-local lustActiveLast = false  -- 上次是否处于嗜血中（用于检测“刚触发”）
 local pollActive = false      -- 0.25s 轮询开关；模块关闭时停掉避免空转
 
 local function ApplyLockVisual()
@@ -332,9 +469,13 @@ local function UpdateDisplay()
     local d = DB()
 
     if not ns.IsModuleEnabled(MODULE_ID) or not d.enabled then
+        ResetLustSession()
         frame:Hide()
         return
     end
+
+    local state = SampleLust()
+    SyncLustMusic()
 
     -- 按当前处于 单人/小队/团队 的可见性设置决定显示；解锁时强制可见便于摆位。
     local show
@@ -350,17 +491,9 @@ local function UpdateDisplay()
     frame.rows[1]:SetShown(showLust)
 
     -- 第一行：嗜血
-    local lustTxt, lustCol = GetLustState()
+    local lustTxt, lustCol = GetLustDisplay(state)
     frame.rows[1].text:SetText(lustTxt)
     frame.rows[1].text:SetTextColor(lustCol[1], lustCol[2], lustCol[3])
-    local lustActive = lustTxt:find("嗜血中") ~= nil
-    if lustActive and not lustActiveLast then
-        PlayLustMusic()      -- 刚触发嗜血
-    elseif not lustActive and lustActiveLast then
-        StopLustMusic()      -- 嗜血结束
-    end
-    lustActiveLast = lustActive
-
     -- 第二行：战复
     if d.showBrez then
         frame.rows[2]:Show()
@@ -433,8 +566,28 @@ local function CreateFrameOnce()
     -- 0.25s 刷新，倒计时够顺滑又不费。模块关闭时由 OnDisable 停掉。
     pollActive = true
     local acc = 0
-    -- Keep music detection alive even when both visual rows are hidden.
+    -- 音乐独立轮询，不依附可见监控框。玩家光环事件用于及时捕获疲惫的移除/新获得。
     local poll = CreateFrame("Frame", "BaimiaoRaidCDPoll", UIParent)
+    poll:RegisterEvent("UNIT_AURA")
+    poll:RegisterEvent("PLAYER_ENTERING_WORLD")
+    poll:RegisterEvent("PLAYER_LEAVING_WORLD")
+    poll:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    poll:RegisterEvent("PLAYER_DEAD")
+    poll:SetScript("OnEvent", function(_, event, unit)
+        -- 即使模块在载入期间关闭，也不能把离开世界的标记留到再次启用。
+        if event == "PLAYER_ENTERING_WORLD" then worldLeaving = false end
+        if not pollActive or (event == "UNIT_AURA" and unit ~= "player") then return end
+        if event == "PLAYER_LEAVING_WORLD" then
+            worldLeaving = true
+            ResetLustSession()
+        elseif event == "PLAYER_ENTERING_WORLD" then
+            worldLeaving = false
+            ResetLustSession()
+        elseif event == "PLAYER_DEAD" then
+            ResetLustSession()
+        end
+        UpdateDisplay()
+    end)
     poll:SetScript("OnUpdate", function(_, dt)
         if not pollActive then return end
         acc = acc + dt
@@ -545,6 +698,8 @@ local function SetupSlash()
             LayoutDB().locked = true; Refresh(); ns.Print("嗜血/战复监控：已锁定。")
         elseif cmd == "unlock" then
             LayoutDB().locked = false; Refresh(); ns.Print("嗜血/战复监控：已解锁，可拖动。")
+        elseif cmd == "music" then
+            ReportMusic()
         elseif cmd == "reset" then
             local d = LayoutDB()
             d.point, d.relPoint, d.x, d.y = "CENTER", "CENTER", 0, 60
@@ -568,15 +723,17 @@ ns.RegisterModule({
         RegisterBundled()
         CreateFrameOnce()
         SetupSlash()
+        ResetLustSession()
         UpdateDisplay()
     end,
     OnDisable = function()
         pollActive = false
         if frame then frame:Hide() end
-        StopLustMusic()  -- 顺手停掉可能正在循环的嗜血音乐
+        ResetLustSession()
     end,
     OnToggle = function(_, on)
         if on then
+            ResetLustSession()
             pollActive = true
         end
         Refresh()
