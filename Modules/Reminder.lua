@@ -21,7 +21,6 @@ local DEFAULT_LONE_WOLF = "155228,164273,295390"
 
 local defaults = {
     fontSize = 40,
-    outline = true,
     color = { r = 1.0, g = 0.2, b = 0.2 },
     pulse = true,               -- 闪烁提醒
     onlyOutOfCombat = false,    -- 只在脱战时提醒
@@ -198,7 +197,7 @@ local testUntil = 0  -- “测试”时强制显示到某时间点
 local function ApplyLook()
     if not frame then return end
     local d = DB()
-    frame.text:SetFont(GameFontNormal:GetFont(), d.fontSize or 40, d.outline and "OUTLINE" or "")
+    ns.UI.SetRuntimeFont(frame.text, GameFontNormal:GetFont(), d.fontSize or 40)
     local c = d.color or { r = 1, g = 1, b = 1 }
     frame.text:SetTextColor(c.r, c.g, c.b)
 end
@@ -409,8 +408,6 @@ local function BuildOptions(panel,m,L)
     L:ColorSwatch("默认文字颜色",
         function() local c = DB().color return c.r, c.g, c.b end,
         function(r, g, b) DB().color = { r = r, g = g, b = b } end, Refresh)
-    L:Check("轮廓字体", function() return DB().outline end,
-        function(v) DB().outline = v end, Refresh)
     L:Check("闪烁提醒", function() return DB().pulse end,
         function(v) DB().pulse = v end, Refresh)
     L:Check("锁定位置（锁定后不挡鼠标；解锁可拖动摆位）",

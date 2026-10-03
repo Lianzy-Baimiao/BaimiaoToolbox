@@ -30,7 +30,6 @@ local defaults = {
         speed = true,
         distance = true,
         scale = 1,
-        outline = true,
         fontSize = 16,
         coordColor = { r = 0.0, g = 0.9, b = 0.4 },
         speedColor = { r = 1.0, g = 0.5, b = 0.0 },
@@ -348,7 +347,7 @@ local function ApplyLook()
     if not button then return end
     local d = DB().display
     local fontPath = GameFontNormal:GetFont()
-    button.text:SetFont(fontPath, d.fontSize or 16, d.outline and "OUTLINE" or "")
+    ns.UI.SetRuntimeFont(button.text, fontPath, d.fontSize or 16)
 end
 
 local function UpdateDisplay()
@@ -473,12 +472,8 @@ local function BuildOptions(panel,m,layout)
         function(cell) cell:Check("显示目标距离", function() return DB().display.distance end,
             function(v) DB().display.distance = v end, Refresh) end,
     })
-    layout:Row({
-        function(cell) cell:Check("锁定位置（Alt+左键可拖动）", function() return L().locked end,
-            function(v) L().locked = v end, Refresh) end,
-        function(cell) cell:Check("轮廓字体", function() return DB().display.outline end,
-            function(v) DB().display.outline = v end, Refresh) end,
-    })
+    layout:Check("锁定位置（Alt+左键可拖动）", function() return L().locked end,
+        function(v) L().locked = v end, Refresh)
     layout:Row({
         function(cell) cell:ColorSwatch("坐标颜色",
             function() local c = DB().display.coordColor return c.r, c.g, c.b end,

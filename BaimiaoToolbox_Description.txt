@@ -1,0 +1,115 @@
+BaimiaoToolbox — small tools, one workspace.
+
+A modular utility addon for World of Warcraft Retail. Keep useful shortcuts, reminders, and Mythic+ information together, and enable only the features you want.
+
+**Interface language:** Simplified Chinese only. This English description explains the features; it does not indicate an English in-game translation.
+
+## Everyday shortcuts
+
+- **Coordinates and sharing:** Display coordinates, movement speed, and target distance, with customizable coordinate-sharing messages.
+- **Quick buttons:** Set up five mount categories on one compact page and choose their mouse/modifier click bindings. Build an extension bar for toys, spells, items, and common actions using editable rows that you can add, delete, and reorder.
+- **Character and party menus:** Copy a character's full Name-Realm with Ctrl+C, send manual guild invitations, or select a specific online Battle.net character for an invitation.
+
+## Reminders without extra clutter
+
+- **Instance and queue reminders:** Text-only notices show instance difficulty, loot specialization, and equipment durability, or tell you when a supported dungeon, raid, battleground, or arena queue is ready. Separate hold/fade timers and optional queue sounds are configurable.
+- **Trade receipts:** A local chat summary of the partner, gold, items, and enchantment service after a confirmed successful trade. No channel spam or saved trade ledger.
+- **Aura and pet reminders:** Customize prompts for missing auras or pets.
+- **Bloodlust and battle resurrection:** Display available status information and battle-resurrection charges. Optional bloodlust music can use media registered by other addons or a configured sound path.
+- **Spell-sequence reminders:** Save plans by specialization, show cooldown cues, and add optional notes below the icons. Single-target/AOE labels can appear together. Skill icons always stay on one line and shrink to fit if necessary; three Retribution Paladin presets are included. This is a passive reminder, not a dynamic rotation engine or automatic casting tool.
+
+## Mythic+ and group tools
+
+- **Mythic+ overview:** Dungeon results, weekly runs, Great Vault progress, and buttons for learned dungeon teleports. Compact summaries list multiple run levels; tooltips show the full available run history.
+- **Party keystones:** Show shared keys from current party members. Supports LibKeystone, Keystone Group List, AngryKeystones, and LibOpenRaid-compatible messages, plus actual keystone links shared by party members. Availability depends on the sender's addon and supported message channel; the addon cannot inspect another player's bags.
+- **Marker assistant:** Target markers, world markers, ready checks, and native group countdowns, subject to game permissions.
+
+## Make it yours
+
+Open the workspace with **/bm** or the minimap button. Modules can be switched on or off individually, and the workspace has light and dark themes. A separate appearance page controls font outlines for the addon's non-settings text without changing Blizzard UI or other addons.
+
+Feature settings are account-wide; frame positions and lock settings are saved per character.
+
+## Install and upgrade
+
+Install the addon for your **Retail** game instance. For manual installation, place the **BaimiaoToolbox** folder in `World of Warcraft/_retail_/Interface/AddOns/`, with `BaimiaoToolbox.toc` directly inside it.
+
+When upgrading from **1.9.14 or earlier to 1.9.15**, fully exit the game before installation and restart it afterward to load the new files. Keep your SavedVariables; no settings reset is required.
+
+## Compatibility and limits
+
+- Retail only, not Classic or Classic Era. Use the supported game versions listed on the download page.
+- No external addon is required. LibSharedMedia-3.0 integration is optional and is not bundled. A private, modified LibDeflate component is included for party-keystone messages and does not register as a shared library.
+- Missing or API-restricted information is not fabricated. An unknown party keystone does not mean the player has no key.
+- Protected actions, combat restrictions, and group permissions still apply. Queue invitations are not accepted automatically.
+- Queue sounds respect the game's sound, volume, and background-audio settings; they cannot force playback through mute. No audio files are included. Optional music requires your own sound source.
+
+## Feedback and source
+
+Please include the addon version, Retail client version, enabled modules, reproduction steps, and any Lua error text when reporting a problem.
+
+Issues: https://github.com/Lianzy-Baimiao/BaimiaoToolbox/issues
+
+Source and releases: https://github.com/Lianzy-Baimiao/BaimiaoToolbox
+
+The addon's own code is MIT-licensed; see LICENSE. The bundled modified LibDeflate retains its zlib license and attribution in `Libs/KeystoneDeflate.lua`.
+
+---
+
+## 中文说明
+
+**白描工具箱：把常用的小功能，收进一个工作台。**
+
+面向魔兽世界正式服的模块化小工具合集，将快捷操作、屏幕提醒和大秘境信息集中管理；按需启用，不必打开所有功能。
+
+**界面语言：**当前游戏内仅提供简体中文，尚未提供英文界面翻译。
+
+### 日常快捷操作
+
+- **坐标喊话：**显示坐标、移动速度和目标距离，支持自定义坐标分享消息。
+- **快捷按钮：**五类坐骑集中在同一页，自选鼠标与修饰键组合；技能、物品、玩具和常用动作采用逐条编辑，支持新增、删除和上下调序。
+- **角色与队伍菜单：**手动 Ctrl+C 复制完整“名字-服务器”，发送公会邀请，或在战网好友多角色在线时选择指定角色邀请。
+
+### 简洁的屏幕提醒
+
+- **进本与排队提醒：**纯文字显示副本难度、拾取专精和装备耐久，或提醒地下城、团队查找器及战场、竞技场队列已就绪；分别设置停留与渐隐时间，可选排队提示音。
+- **交易回执：**交易成功后，仅在本机聊天框显示对象、金币、物品及附魔服务摘要，不刷频道、不建立交易账本。
+- **光环 / 宠物提示：**提醒缺失光环或宠物，支持自定义提示。
+- **嗜血 / 战复监控：**显示可获取的状态信息和战复次数；嗜血音乐可选用其他插件注册的媒体或自行配置的音频路径。
+- **循环提示助手：**按专精保存方案、显示冷却，可在技能下方显示方案备注；支持单体 / AOE 同时标注，技能图标始终单行，过长自动缩小。附带三套惩戒骑预设，仅作被动顺序提醒，不是动态输出推荐，也不会自动施法。
+
+### 大秘境与团队工具
+
+- **大秘境看板：**副本成绩、本周记录、宏伟宝库进度，以及已学会的副本传送入口。汇总紧凑列出多次通关层数，悬停查看全部可获取记录。
+- **队友钥石：**展示当前小队成员分享的钥石，支持 LibKeystone、Keystone Group List、AngryKeystones 与 LibOpenRaid 兼容消息，以及队友发送的真实钥石链接。是否能获取取决于对方插件和消息频道，不会直接读取其他玩家的背包。
+- **标记助手：**目标标记、地面标记、就位确认和原生团队倒数，遵守游戏权限限制。
+
+### 按自己的习惯设置
+
+输入 **/bm** 或点击小地图按钮打开工作台，各模块可独立开关，提供深浅两种主题。独立的外观设置统一控制插件非设置界面的轮廓字体，不影响游戏原生界面或其他插件。
+
+功能配置账号共享，界面位置与锁定状态按角色保存。
+
+### 安装与升级
+
+请安装到**正式服**客户端。手动安装时，将 **BaimiaoToolbox** 文件夹放入 `World of Warcraft/_retail_/Interface/AddOns/`，确保 `BaimiaoToolbox.toc` 直接位于该文件夹内。
+
+从 **1.9.14 或更早版本升级到 1.9.15** 时，请完全退出游戏后安装，再重新进入，以加载新增文件。保留 SavedVariables，无需清空或重置设置。
+
+### 兼容性与限制
+
+- 仅面向正式服，不支持怀旧服；具体游戏版本以下载页面标记为准。
+- 无需必装的外部插件。LibSharedMedia-3.0 为可选集成，未内嵌该库；队友钥石通信使用内嵌的私有修改版 LibDeflate，不注册为共享库。
+- 不伪造未获取或被 API 限制的数据；“待同步”不代表队友没有钥石。
+- 受保护操作、战斗限制和队伍权限仍然有效；不会自动接受队列邀请。
+- 排队提示音遵循游戏声音、音量与后台声音设置，不能强制突破静音。安装包不含音频文件，可选音乐需自行配置来源。
+
+### 反馈与源码
+
+反馈时请附上插件版本、正式服客户端版本、已启用模块、复现步骤及 Lua 报错文本。
+
+问题反馈：https://github.com/Lianzy-Baimiao/BaimiaoToolbox/issues
+
+源码与发布：https://github.com/Lianzy-Baimiao/BaimiaoToolbox
+
+插件自有代码采用 MIT 许可证，详见 LICENSE；内嵌的私有修改版 LibDeflate 保留 zlib 许可证，完整声明及署名位于 `Libs/KeystoneDeflate.lua`。

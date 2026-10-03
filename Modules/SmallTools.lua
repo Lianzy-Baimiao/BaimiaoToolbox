@@ -1,7 +1,7 @@
 -- Small, user-triggered menu actions. No automatic invitations or menu replacement.
 local ADDON, ns = ...
 local ID="smalltools"
-local defaults={guildInvite=true,multiInvite=true}
+local defaults={guildInvite=true,multiInvite=true,copyName=true}
 local function DB() return ns.GetDB(ID,defaults) end
 local function enabled(key) return ns.IsModuleEnabled(ID) and DB()[key] end
 local function public(v) return not (issecretvalue and issecretvalue(v)) end
@@ -84,11 +84,11 @@ local function canGuild(name,unit)
     if C_GuildInfo and call(C_GuildInfo.MemberExistsByName,name)==true then return false end
     return type(C_GuildInfo and C_GuildInfo.Invite or GuildInvite)=="function"
 end
-local function unitTarget(context,tag)
+local function unitTarget(context,tag,copy)
     local unit=text(context.unit)
     if unit then
-        if call(UnitIsPlayer,unit)~=true or call(UnitIsUnit,unit,"player")==true
-            or call(UnitIsConnected,unit)==false then return end
+        if call(UnitIsPlayer,unit)~=true or (not copy and (call(UnitIsUnit,unit,"player")==true
+            or call(UnitIsConnected,unit)==false)) then return end
         local name,realm=call(UnitFullName,unit)
         return fullName(name,realm),unit,text(call(UnitGUID,unit))
     end
@@ -122,6 +122,34 @@ local function inviteGuild(name,unit,guid,account,expected,context,tag)
     local ok=pcall(fn,name)
     if not ok then feedback() end
 end
+-- Copy is deliberately independent of invitation permissions. The text is the
+-- exact character chosen when the menu opened; never substitute a BNet nickname.
+local copyDialog
+local function copyName(name)
+    if not enabled("copyName") then return end
+    if not copyDialog then
+        local f=CreateFrame("Frame","BaimiaoCopyNameDialog",UIParent,"BackdropTemplate")
+        f:SetSize(380,118);f:SetPoint("CENTER");f:SetFrameStrata("DIALOG")
+        f:SetClampedToScreen(true);f:EnableMouse(true)
+        f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
+        f:SetBackdropColor(.055,.065,.075,.98);f:SetBackdropBorderColor(0,.65,.5,1)
+        local title=f:CreateFontString(nil,"ARTWORK","GameFontNormal")
+        ns.UI.RegisterRuntimeFont(title)
+        title:SetPoint("TOPLEFT",16,-14);title:SetText("复制角色名 · Ctrl+C 复制，Esc 关闭")
+        local edit=CreateFrame("EditBox",nil,f,"InputBoxTemplate")
+        ns.UI.RegisterRuntimeFont(edit)
+        edit:SetSize(342,28);edit:SetPoint("TOPLEFT",20,-48)
+        edit:SetAutoFocus(false);edit:SetMaxLetters(0)
+        edit:SetScript("OnEscapePressed",function()f:Hide()end)
+        edit:SetScript("OnEnterPressed",function()f:Hide()end)
+        f:SetScript("OnHide",function()edit:ClearFocus()end)
+        local close=CreateFrame("Button",nil,f,"UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT",2,2);close:SetScript("OnClick",function()f:Hide()end)
+        f.edit=edit;copyDialog=f
+    end
+    copyDialog:Show();copyDialog.edit:SetText(name)
+    copyDialog.edit:SetFocus();copyDialog.edit:HighlightText()
+end
 local function modify(tag,_,root,context)
     if not ns.IsModuleEnabled(ID) or not plain(context) then return end
     local account=accountID(context)
@@ -129,6 +157,24 @@ local function modify(tag,_,root,context)
     local entries=account and characters(account) or {}
     local divided=false
     local function divider() if not divided then root:QueueDivider();divided=true end end
+    if enabled("copyName") then
+        if bnet and #entries>0 then
+            divider()
+            if #entries==1 then
+                local name=entries[1].name
+                root:CreateButton("复制角色名",function()copyName(name)end)
+            else
+                local menu=root:CreateButton("复制角色名")
+                for _,entry in ipairs(entries) do
+                    local name=entry.name
+                    menu:CreateButton(name,function()copyName(name)end)
+                end
+            end
+        elseif not bnet then
+            local name=unitTarget(context,tag,true)
+            if name then divider();root:CreateButton("复制角色名",function()copyName(name)end)end
+        end
+    end
     if enabled("multiInvite") and account and #entries>1 then
         divider()
         local menu=root:CreateButton("选择角色邀请")
@@ -177,10 +223,13 @@ end
 local function start()
     register()
     if ns.MarkerAssist then ns.MarkerAssist.Start()end
+    if ns.SmallToolsExtras then ns.SmallToolsExtras.Start()end
 end
 local function stop()
     events:UnregisterAllEvents()
     if ns.MarkerAssist then ns.MarkerAssist.Stop()end
+    if ns.SmallToolsExtras then ns.SmallToolsExtras.Stop()end
+    if copyDialog then copyDialog:Hide()end
 end
 local function BuildOptions(_,m,L)
     L:Title("小工具集合")
@@ -189,10 +238,14 @@ local function BuildOptions(_,m,L)
         function(cell) cell:Check("公会邀请",function()return DB().guildInvite end,function(v)DB().guildInvite=v end) end,
         function(cell) cell:Check("多角色在线：选择角色邀请组队",function()return DB().multiInvite end,function(v)DB().multiInvite=v end) end,
     }, 260)
+    L:Check("复制角色名（名字-服务器）",function()return DB().copyName end,function(v)
+        DB().copyName=v;if not v and copyDialog then copyDialog:Hide()end
+    end)
+    if ns.SmallToolsExtras then ns.SmallToolsExtras.BuildOptions(L)end
     if ns.MarkerAssist then ns.MarkerAssist.BuildOptions(L)end
 end
 events:SetScript("OnEvent",function() if ns.IsModuleEnabled(ID) then register() end end)
-ns.RegisterModule({id=ID,name="小工具集合",desc="右键邀请、标记与团队倒数。",defaults=defaults,
+ns.RegisterModule({id=ID,name="小工具集合",desc="右键邀请与复制、进本与排队提醒、交易回执、标记与倒数。",defaults=defaults,
     BuildOptions=BuildOptions,OnEnable=start,
     OnDisable=stop,
     OnToggle=function(_,on) if on then start() end end})

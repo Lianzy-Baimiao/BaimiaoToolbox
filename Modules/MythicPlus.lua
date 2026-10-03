@@ -29,7 +29,7 @@ end
 local function paint(fn) painters[#painters+1]=fn;fn() end
 local function text(parent,value,size,role)
     local fs=parent:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-    fs:SetFont(STANDARD_TEXT_FONT or GameFontNormal:GetFont(),size or 13,"")
+    UI.SetRuntimeFont(fs,STANDARD_TEXT_FONT or GameFontNormal:GetFont(),size or 13)
     fs:SetJustifyH("LEFT");fs:SetWordWrap(false);fs:SetText(value)
     paint(function() fs:SetTextColor(unpack(UI.palette[role or "text"])) end)
     return fs
@@ -64,6 +64,7 @@ local function button(parent,value,width,fn)
     local b=CreateFrame("Button",nil,parent,"UIPanelButtonTemplate")
     b:SetSize(width,26);b:SetText(value);UI.SkinTextButton(b)
     UI.StyleText(b:GetFontString(),"text")
+    UI.RegisterRuntimeFont(b:GetFontString())
     b:SetScript("OnClick",fn);return b
 end
 local function openVault()
@@ -223,22 +224,76 @@ HidePortals=function()
         b:Hide();b:SetAttribute("type1",nil);b:SetAttribute("spell",nil)
     end
 end
+-- Keep one summary row per dungeon; retain every completion for its tooltip.
+local function summaryRows()
+    local grouped,list,seen={},{},{}
+    for _,run in ipairs(snapshot.runs) do
+        local group=grouped[run.id]
+        if not group then group={};grouped[run.id]=group end
+        group[#group+1]=run
+    end
+    local function append(map)
+        seen[map.id]=true
+        local group=grouped[map.id] or {}
+        list[#list+1]={item=map,runs=group}
+    end
+    for _,map in ipairs(sortedMaps()) do append(map) end
+    -- History can arrive before the season map list or contain a removed map.
+    -- Do not discard those completions merely because no current card exists.
+    for _,run in ipairs(snapshot.runs) do
+        if not seen[run.id] then append(D.Map(run.id)) end
+    end
+    return list
+end
+-- Fit complete level tokens, reserving room for an ellipsis while more remain.
+-- Measure the actual font, not byte lengths (names, colors and outlines vary).
+local function SummaryLevels(font,runs)
+    local prefix=#runs.."次  "
+    local parts,shown={},0
+    for i,run in ipairs(runs) do
+        parts[i]=Level(run.level,run.timed)
+        font:SetText(prefix..table.concat(parts,"/")..(i<#runs and "/…" or ""))
+        if font:GetUnboundedStringWidth()>font:GetWidth() then parts[i]=nil;break end
+        shown=i
+    end
+    font:SetText(prefix..table.concat(parts,"/")..(shown<#runs and (shown>0 and "/…" or "…") or ""))
+end
+local function SummaryTooltip(owner,map,runs)
+    local lines={}
+    if not snapshot.historyReady then lines[1]="本周记录待同步"
+    elseif #runs==0 then lines[1]="本周尚未完成"
+    else
+        lines[1]="本周完成 "..#runs.." 次"
+        for i,run in ipairs(runs) do
+            lines[#lines+1]={i..". "..Level(run.level,run.timed).." "..TimePair(run),Timed(run)}
+        end
+    end
+    tip(owner,map.name,lines)
+end
 local function RenderRows()
     if not snapshot or not canvas then return end
     local summary=mode=="maps"
-    local list=summary and sortedMaps() or snapshot.runs
+    local list=summary and summaryRows() or snapshot.runs
     local visible=10
     rowOffset=math.max(0,math.min(rowOffset,math.max(0,#list-visible)))
     for i,f in ipairs(rows) do
         if GameTooltip and GameTooltip:IsOwned(f) then leave() end
-        local item=list[rowOffset+i];f.item=item;f.summary=summary;f:SetShown(item~=nil)
+        local entry=list[rowOffset+i]
+        local item=entry and (summary and entry.item or entry)
+        f.item=item;f.summary=summary;f.runs=summary and entry and entry.runs or nil
+        f:SetShown(item~=nil)
         if item then
             f.left:SetText(summary and item.name or (Level(item.level,item.timed).."  "..item.name))
+            f.left:SetTextColor(unpack(UI.palette[summary and "accent" or "text"]))
             f.time:SetText(summary and "" or TimePair(item))
             f.time:SetShown(not summary)
-            f.left:SetWidth(summary and 204 or 150)
-            f.right:ClearAllPoints();f.right:SetPoint("TOPLEFT",summary and 212 or 276,-6);f.right:SetWidth(summary and 92 or 28)
-            f.right:SetText(summary and (not snapshot.historyReady and "待同步" or (item.count>0 and (item.count.."次 / "..Level(item.weekly,item.weeklyRun and item.weeklyRun.timed)) or "未完成")) or (item.timed==nil and "未知" or Timed(item)))
+            f.left:SetWidth(summary and 142 or 150)
+            f.right:ClearAllPoints();f.right:SetPoint("TOPLEFT",summary and 154 or 276,-6);f.right:SetWidth(summary and 150 or 28)
+            if summary then
+                if not snapshot.historyReady then f.right:SetText("待同步")
+                elseif #entry.runs==0 then f.right:SetText("未完成")
+                else SummaryLevels(f.right,entry.runs) end
+            else f.right:SetText(item.timed==nil and "未知" or Timed(item)) end
             f.right:SetTextColor(unpack(UI.palette[(not summary and item.timed==true) and "accent" or "muted"]))
             if not summary and item.timed==false then f.right:SetTextColor(1,.45,.35) end
         end
@@ -250,6 +305,15 @@ local function RenderRows()
     canvas.mapTab.caption:SetText("副本汇总  "..#snapshot.maps)
     canvas.runTab:UpdateSelection();canvas.mapTab:UpdateSelection()
 end
+-- Compact teammate rows only. Keep full names in tooltips, dungeon cards and
+-- the data/sync layer; unfamiliar dungeons continue to use their native name.
+local partyDungeonNames={
+    ["纳洛拉克的洞穴"]="洞穴",
+    ["虚空之痕竞技场"]="竞技场",
+    ["虚空之痕"]="竞技场",
+    ["塞塔里斯神庙"]="神庙",
+    ["红玉新生法池"]="红玉",
+}
 local function RenderParty()
     local members=ns.PartyKeystones and ns.PartyKeystones.Snapshot() or {}
     for i,f in ipairs(partyRows)do
@@ -258,7 +322,8 @@ local function RenderParty()
         if entry then
             f.owner:SetText(tint(entry.shortName,D.ClassColor(entry.class)))
             f.level:SetText(entry.level and entry.level>0 and Level(entry.level) or "")
-            f.dungeon:SetText(entry.status or D.Map(entry.mapID).name)
+            local name=entry.status or D.Map(entry.mapID).name
+            f.dungeon:SetText(partyDungeonNames[name] or name)
         end
     end
 end
@@ -352,7 +417,7 @@ local function build()
         f:EnableMouseWheel(true);f:SetScript("OnMouseWheel",canvas.list:GetScript("OnMouseWheel"))
         f:SetScript("OnEnter",function(self)
             local item=self.item;if not item then return end
-            if self.summary then tip(self,item.name,MapLines(item,true)) else RunTooltip(self,item) end
+            if self.summary then SummaryTooltip(self,item,self.runs) else RunTooltip(self,item) end
         end);f:SetScript("OnLeave",leave);rows[i]=f
     end
     canvas.empty=label(canvas.weekly,"",12,16,189,296,"muted")
@@ -373,10 +438,10 @@ Render=function()
     canvas.key:SetText(snapshot.keyName and ("当前钥石  "..Level(snapshot.keyLevel).."  "..snapshot.keyName) or "当前未持有钥石")
     local keyWidth=hasParty and partyLeft-22 or leftWidth-4
     local keyFont=STANDARD_TEXT_FONT or GameFontNormal:GetFont()
-    canvas.key:SetFont(keyFont,18,"");canvas.key:SetWidth(0)
+    UI.SetRuntimeFont(canvas.key,keyFont,18);canvas.key:SetWidth(0)
     local naturalWidth=canvas.key:GetStringWidth()
     if hasParty and naturalWidth>keyWidth then
-        canvas.key:SetFont(keyFont,math.max(14,math.floor(18*keyWidth/naturalWidth)),"")
+        UI.SetRuntimeFont(canvas.key,keyFont,math.max(14,math.floor(18*keyWidth/naturalWidth)))
     end
     canvas.key:SetWidth(keyWidth)
     RenderParty()

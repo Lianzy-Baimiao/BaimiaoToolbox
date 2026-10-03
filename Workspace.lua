@@ -77,6 +77,8 @@ local function styleOptions(frame)
     if frame:GetObjectType()=="EditBox" and not frame._bmTextRole then UI.StyleText(frame,"text") end
     for _, child in ipairs({frame:GetChildren()}) do styleOptions(child) end
 end
+-- 动态新增的设置行复用与初次构建相同的主题 / 字体处理。
+UI.StyleOptions = styleOptions
 local function applyTheme()
     UI.palette = palettes[prefs().theme] or palettes.dark
     for _, paint in ipairs(painters) do paint() end
@@ -93,7 +95,7 @@ local descriptions = {
     raidcd="嗜血、战复与触发音乐。",
     rotation="技能循环与冷却提示。",
     mythicplus="副本成绩、记录与手动传送。",
-    smalltools="右键邀请、标记与团队倒数。",
+    smalltools="右键操作、进本与排队提醒、交易回执。",
 }
 local icons={135802,132261,135940,136012,135959,525134,133742}
 local function combatMessage()
@@ -133,8 +135,8 @@ local function selectPage(key)
     end
     local m=ns.modules[key]
     workspace.currentModule=m
-    workspace.heading:SetText(m and m.name or "旅程，从容开始。")
-    workspace.eyebrow:SetText(m and "MODULE SETTINGS / 功能设置" or "YOUR ADVENTURE, ORGANIZED")
+    workspace.heading:SetText(m and m.name or (key=="appearance" and "外观设置" or "旅程，从容开始。"))
+    workspace.eyebrow:SetText(m and "MODULE SETTINGS / 功能设置" or (key=="appearance" and "APPEARANCE / 全局外观" or "YOUR ADVENTURE, ORGANIZED"))
     workspace.toggle:SetShown(m~=nil)
     if m and m._syncLayout and not InCombatLockdown() then m._syncLayout:SyncAll() end
     refresh()
@@ -270,6 +272,21 @@ local function createModulePage(m)
     styleOptions(child)
     host:SetScript("OnShow",function() if not InCombatLockdown() then layout:SyncAll() end end)
 end
+local function createAppearancePage()
+    local host=CreateFrame("Frame",nil,workspace.content)
+    host:SetAllPoints();host:Hide();pages.appearance=host
+    local child=UI.MakeScrollable(host)
+    child:SetWidth(738)
+    local layout=UI.NewLayout(child)
+    layout:Title("统一屏幕文字")
+    layout:Text("账号通用，修改后立即生效；各模块的字号、颜色与位置保持不变。",true)
+    layout:Section("字体样式")
+    layout:Check("轮廓字体",function() return UI.GetAppearanceDB().outline end,UI.SetRuntimeOutline)
+    layout:Text("作用于本插件所有非设置界面文字：坐标、提醒、快捷按钮、循环提示、大秘境看板、标记助手和提示小条等。",true)
+    layout:Text("不改变工具箱设置界面的字体，也不修改游戏原生聊天、菜单、鼠标提示或其他插件的字体。",true)
+    layout:Finalize();layout:SyncAll();styleOptions(child)
+    host:SetScript("OnShow",function() if not InCombatLockdown() then layout:SyncAll() end end)
+end
 function UI.BuildWorkspace()
     if workspace then return end
     UI.palette=palettes[prefs().theme] or palettes.dark
@@ -316,6 +333,7 @@ function UI.BuildWorkspace()
     for i,m in ipairs(ns.orderedModules) do
         if m.BuildOptions then createModulePage(m);navItem(m.id,m.name or m.id,i) end
     end
+    createAppearancePage();navItem("appearance","外观设置",#ns.orderedModules+1)
     -- An opaque, higher-level guard prevents unsafe edits when combat begins
     -- while settings are open. Theme/close controls remain usable.
     local guard=surface(workspace)

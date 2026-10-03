@@ -452,7 +452,7 @@ local function ApplyLook()
     local fontPath = GameFontNormal:GetFont()
     for _, row in ipairs(frame.rows) do
         row.icon:SetSize(size, size)
-        row.text:SetFont(fontPath, size, "OUTLINE")
+        ns.UI.SetRuntimeFont(row.text, fontPath, size)
     end
     frame.rows[1]:SetHeight(size + 2)
     frame.rows[2]:SetHeight(size + 2)

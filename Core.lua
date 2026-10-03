@@ -121,6 +121,56 @@ end
 
 ns.UI = {}
 
+-- Account-wide appearance, separate from feature switches and character layout.
+-- Read the legacy coordinate preference once; explicit false must survive.
+function ns.UI.GetAppearanceDB()
+    local db = ns.GetDB("_appearance")
+    if db.outline == nil then
+        local coord = BaimiaoToolboxDB.coordshout
+        local legacy = type(coord) == "table" and coord.display
+        if type(legacy) == "table" and type(legacy.outline) == "boolean" then
+            db.outline = legacy.outline
+        else
+            db.outline = true
+        end
+    end
+    return db
+end
+
+-- Explicit opt-in only: never mutate shared GameFont objects, Blizzard UI, or
+-- settings text. Keep each owned FontString/EditBox's font, size and other flags.
+local runtimeFonts = setmetatable({}, { __mode = "k" })
+local function runtimeFontFlags(flags)
+    local out = {}
+    for flag in string.gmatch(flags or "", "[^,%s]+") do
+        if flag ~= "OUTLINE" and flag ~= "THICKOUTLINE" then out[#out + 1] = flag end
+    end
+    if ns.UI.GetAppearanceDB().outline then out[#out + 1] = "OUTLINE" end
+    return table.concat(out, ",")
+end
+function ns.UI.SetRuntimeFont(font, path, size, flags)
+    if not font then return end
+    runtimeFonts[font] = true
+    local currentPath, currentSize, currentFlags = font:GetFont()
+    path, size = path or currentPath, size or currentSize
+    if path and size then
+        font:SetFont(path, size, runtimeFontFlags(flags or currentFlags))
+    end
+    return font
+end
+function ns.UI.RegisterRuntimeFont(font)
+    return ns.UI.SetRuntimeFont(font)
+end
+function ns.UI.RegisterRuntimeCooldown(cooldown)
+    if cooldown and cooldown.GetCountdownFontString then
+        ns.UI.RegisterRuntimeFont(cooldown:GetCountdownFontString())
+    end
+end
+function ns.UI.SetRuntimeOutline(enabled)
+    ns.UI.GetAppearanceDB().outline = not not enabled
+    for font in pairs(runtimeFonts) do ns.UI.RegisterRuntimeFont(font) end
+end
+
 -- 给一个框统一挂上拖动逻辑：解锁时左键可拖；无论锁定与否，Alt+左键 / Ctrl+左键 都能拖。
 -- isLocked() 返回当前是否锁定；onMoved() 在放手后调用（存位置）。
 function ns.UI.EnableDrag(frame, isLocked, onMoved)
@@ -512,7 +562,7 @@ function ns.UI.NewLayout(panel)
         return cb
     end
 
-    function L:Box(w, h, multi, getter, setter, onChange)
+    function L:Box(w, h, multi, getter, setter, onChange, compact)
         if not multi then h = math.max(h, 28) end
         local box = CreateFrame("Frame", nil, self.panel, "BackdropTemplate")
         box:SetSize(w, h)
@@ -603,6 +653,8 @@ function ns.UI.NewLayout(panel)
         local flash = self.panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         flash:SetPoint("LEFT", saveBtn, "RIGHT", 6, 0)
         flash:SetText("")
+        -- 紧凑单行表格不另占保存按钮/提示的列；回车或失焦提交，Esc 取消。
+        if compact and not multi then saveBtn:Hide(); flash:Hide() end
 
         local dirty = false
         local function markDirty()

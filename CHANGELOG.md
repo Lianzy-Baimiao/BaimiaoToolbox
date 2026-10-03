@@ -1,3 +1,99 @@
+## 1.9.15 — 2026-10-04
+
+Upgrade notes: 1.9.14 → 1.9.15 · 2026-10-04
+
+## English
+
+### New small utilities
+
+- **Copy character name:** Use supported player, friend, or chat context menus to open a preselected `Name-Realm` field, then press Ctrl+C. Multiple online Battle.net characters can be selected individually; BattleTags are not copied.
+- **Instance information:** A text-only reminder shows instance difficulty, loot specialization, and lowest equipped-item durability. Durability at 30% or below is highlighted. No background or border.
+- **Queue-ready reminders:** Text notifications for Dungeon/Raid Finder and battleground/arena queue confirmations, with an optional extra sound. Instance and queue reminders each have their own hold time (1–30 seconds), fade time (0–10 seconds), and preview.
+- **Trade receipts:** After the game confirms a successful trade, a local chat message summarizes the partner, gold, items, and enchantment service. Cancelled trades do not produce receipts. Nothing is sent to chat channels or saved as a trade ledger.
+- Each utility has its own switch and is enabled by default within the Small Tools module. Queue sounds respect the game's main sound, volume, and background-audio settings; the addon does not force sound through mute or change global audio settings. Queue confirmations are never accepted automatically.
+
+### Global appearance
+
+- Added **Appearance Settings** in the workspace sidebar. One account-wide font-outline switch controls the addon's non-settings text, including overlays, shortcut labels, cooldown numbers, Mythic+ panels, and reminder strips.
+- The first upgrade inherits the existing coordinate-overlay outline preference. Module font sizes and colors remain unchanged. Settings pages, Blizzard UI, and other addons are not affected.
+
+### Mythic+ and party keystones
+
+- Expanded party-keystone sharing with AngryKeystones and LibOpenRaid-compatible messages, alongside existing LibKeystone, Keystone Group List, and current-party keystone-link support. Only current-party data is used, with message validation, throttling, and bounded decompression.
+- Long dungeon names use compact Chinese aliases in party rows; full names remain available in tooltips.
+- Dungeon summaries now show all available weekly runs in a compact format such as `2 runs +17/+15`. Long lists end with an ellipsis instead of occupying extra rows. The summary tooltip lists every available run, including repeated levels, elapsed time, and timed/overtime status, without a team roster. Other views retain their existing team tooltips.
+
+### Quick buttons
+
+- Configure all five mount categories on one compact page: flying, repair, auction house, passenger, and underwater. Choose mouse/modifier combinations for each category, leave one unbound, or restore defaults. Assigning an occupied combination swaps the assignments; these are button click bindings, not global keyboard bindings.
+- Extension entries now use an editable row list with type, name/ID, optional short label, move-up/down, delete, and add-row controls. Common actions use a dropdown. The type column is wider and stays on one line.
+- Existing extension text and settings are preserved. Improved toy recognition, including item `253629`, with asynchronous item-data handling and support for full-width Chinese colons in legacy entries.
+
+### Spell-sequence reminders
+
+- Separate skill IDs or names with whitespace; standalone punctuation and arrows between them are accepted. Compact `>` / `+` sequences and repetition markers remain supported. Use spell IDs for names containing spaces.
+- Support labels such as `单体 383328 /AOE 53385`: both skills appear at once, with single-target/AOE captions above their icons. Labels apply to the next skill; the addon does not choose a branch automatically.
+- All skill icons stay on **one horizontal line**. Long sequences automatically scale down to fit the screen without changing the saved scale preference. Removed the per-row setting and the 24-icon cap; the 2048-byte input limit remains.
+- Each specialization's individual plans can store notes and independently choose whether to display them below the skill line. Notes may wrap; skill icons do not. Existing plans and notes are preserved.
+- This remains a passive sequence reminder with cooldown cues, not a dynamic DPS recommendation engine or automatic casting tool.
+
+### Installation, compatibility, and validation
+
+1. Fully exit the game, then install the `BaimiaoToolbox` folder from **BaimiaoToolbox-1.9.15.zip** into `World of Warcraft/_retail_/Interface/AddOns/`. Restart the client so the new runtime files are loaded. Do not use GitHub's automatic Source code archives as the install package.
+2. Keep your SavedVariables; no configuration reset is required. Open `/bm` to review the new utilities and appearance setting.
+3. Retail only; the in-game interface is currently Simplified Chinese only. No external addon is required to load it. Party-keystone availability depends on compatible sharing or a real link from a current party member; missing information is not treated as “no keystone.”
+4. No audio files are bundled. Optional bloodlust music needs a separately configured source. The private, modified LibDeflate component retains its zlib license; the addon's own code remains MIT-licensed.
+
+**Validation:** 366 offline tests and Lua 5.1 syntax checks for all 15 runtime Lua files passed. Offline checks do not replace in-game verification of rendering, sound, trade events, or cross-addon sharing.
+
+---
+
+## 中文
+
+升级说明：1.9.14 → 1.9.15 · 2026-10-04
+
+### 新增小工具
+
+- **复制角色名：**在支持的玩家、好友或聊天右键菜单中打开已选中的“名字-服务器”，手动按 Ctrl+C 复制。战网多角色可逐个选择，不复制战网昵称。
+- **进本信息：**纯文字显示副本难度、拾取专精和最低装备耐久，耐久不高于 30% 时醒目标色；没有背景或边框。
+- **排队就绪提醒：**地下城 / 团队查找器及战场 / 竞技场队列待确认时显示文字，可选额外提示音。进本与排队提醒分别设置停留时间（1–30 秒）、渐隐时间（0–10 秒），并提供预览。
+- **交易完成回执：**游戏确认交易成功后，在本机聊天框显示交易对象、金币、物品及附魔服务摘要；取消交易不生成回执。不向聊天频道发送，也不建立交易账本。
+- 四项功能在小工具模块内独立开关、默认启用。排队提示音遵循游戏主声音、音量和后台声音设置，不强制突破静音或修改全局声音设置，也不会自动接受队列邀请。
+
+### 全局外观设置
+
+- 工作台左侧新增 **外观设置**，将轮廓字体抽离为账号共享开关，统一控制插件所有非设置界面的文字，包括屏幕提示、快捷按钮、冷却数字、大秘境面板和提示小条。
+- 首次升级继承原坐标喊话的轮廓选择，保留各模块字号和颜色；不修改设置页、游戏原生界面或其他插件字体。
+
+### 大秘境与队友钥石
+
+- 队友钥石新增 AngryKeystones 和 LibOpenRaid 兼容消息支持，保留 LibKeystone、Keystone Group List 及当前队友分享钥石链接的识别。仅使用当前小队数据，并加入消息校验、节流和解压大小限制。
+- 队友钥石行采用长副本名简称：纳洛拉克的洞穴 → 洞穴、虚空之痕竞技场 → 竞技场、塞塔里斯神庙 → 神庙、红玉新生法池 → 红玉。鼠标提示仍保留全名。
+- 副本汇总紧凑显示所有可获取的本周记录，例如 `2次 +17/+15`；次数较多时末尾省略，不额外占行。汇总鼠标提示列出全部记录，包括重复层数、用时和限时 / 超时状态，不再显示队伍名单；其他视图原有的队伍提示不变。
+
+### 快捷按钮
+
+- 飞行、修理、拍卖行、载人、水下五类坐骑集中在同一紧凑页面；可自选鼠标与修饰键组合、设为不绑定或恢复默认。选择已占用组合时交换绑定；仅作用于按钮点击，不修改游戏全局键盘绑定。
+- 扩展内容改为逐条编辑：每行包含类型、名称 / ID、可选短名，以及上移、下移、删除操作；支持新增行，常用动作通过下拉选择。类型列加宽，文字保持单行。
+- 保留原扩展内容与设置；修复“奥术秘社的私人钥匙”（物品 ID `253629`）等玩具识别，兼容异步物品加载和旧条目中的全角冒号。
+
+### 循环提示助手
+
+- 技能 ID / 名称按空白分隔，中间独立的标点和箭头均可使用；继续兼容紧凑 `>` / `+` 写法及次数标记。含空格的技能名称请使用技能 ID。
+- 支持 `单体 383328 /AOE 53385`：两个技能同时显示，并在图标上方分别标注单体 / AOE。标注只作用于紧随的技能，不自动判断或选择分支。
+- **所有技能图标固定在同一横行**，过长时自动缩小以适应屏幕，不修改用户保存的缩放值。移除每行数量设置和 24 图标上限，保留 2048 字节输入限制。
+- 每个专精的每个方案可独立填写备注，并选择是否显示在技能行下方。备注可以换行，技能图标不会换行；原方案和备注继续保留。
+- 仍为带冷却信息的被动顺序提示，不是动态输出推荐，也不会自动施法。
+
+### 安装、兼容性与验证
+
+1. **完全退出游戏**，将 **BaimiaoToolbox-1.9.15.zip** 内的 `BaimiaoToolbox` 文件夹安装到 `World of Warcraft/_retail_/Interface/AddOns/`，再重新启动客户端，以加载新增运行文件。不要使用 GitHub 自动生成的 Source code 压缩包安装。
+2. 保留 SavedVariables，无需清空或重置配置。输入 `/bm` 检查新增小工具及外观开关。
+3. 仅支持正式服，当前游戏内界面仅提供简体中文。插件本体无需必装的第三方插件；队友钥石仍依赖兼容同步或当前队友提供的真实链接，未获取数据不等于没有钥石。
+4. 安装包不含音频文件，嗜血音乐需单独配置来源。内嵌的私有修改版 LibDeflate 保留 zlib 许可证，插件自有代码仍使用 MIT 许可证。
+
+**验证：**366 项离线测试及全部 15 个运行 Lua 文件的 Lua 5.1 语法检查通过。离线验证不代替真实游戏内的显示、声音、交易事件或跨插件同步验收。
+
 ## 1.9.14 — 2026-10-03
 
 本次公开版本合并 1.9.9–1.9.14 的本地迭代，包含队友钥石、小工具集合、标记助手、超时染色及紧凑界面。

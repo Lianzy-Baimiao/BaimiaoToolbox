@@ -1,13 +1,15 @@
 -- Current party only. Public, self-reported keys; no inspection, persistent
--- history or chat spam. Interoperates with LibKeystone and Keystone Group List.
+-- history or chat spam. Protocol adapters are independent of the four-row UI.
 local ADDON,ns=...
 local K={};ns.PartyKeystones=K
 local frame=CreateFrame("Frame")
 local running,notify,allowed=false,nil,nil
 local cache,roster,lastSend={}, {}, {}
+local decodeBudget={}
 local signature,lastRequest="",-100
 local lastOwn,ownQueued,epoch={},false,0
-local prefixes={"LibKS","WA-KeyStGrList"}
+local P=ns.PartyKeystoneProtocols
+local prefixes=P.prefixes
 local function public(v)return not (issecretvalue and issecretvalue(v))end
 local function str(v)return public(v) and type(v)=="string" and v~="" and v or nil end
 local function call(fn,...)
@@ -48,6 +50,7 @@ local function rebuild()
         end
     end end
     for guid in pairs(cache)do if not seen[guid] then cache[guid]=nil end end
+    for guid in pairs(decodeBudget)do if not seen[guid] then decodeBudget[guid]=nil end end
     roster=list
     local key=(ch or "solo").."/"..table.concat(ids,"/")
     local different=signature~=key;signature=key
@@ -76,29 +79,42 @@ local function locked()
 end
 local function send(prefix,message)
     local ch=channel()
-    if not active() or not ch or locked() then return end
-    if C_ChatInfo and C_ChatInfo.SendAddonMessage then pcall(C_ChatInfo.SendAddonMessage,prefix,message,ch)end
+    if not active() or not ch or not message or not P.Supports(prefix,ch) or locked() then return end
+    if C_ChatInfo and C_ChatInfo.SendAddonMessage then
+        local ok,result=pcall(C_ChatInfo.SendAddonMessage,prefix,message,ch)
+        return ok and result~=false
+    end
+end
+local function number(v,maximum)
+    return public(v) and type(v)=="number" and v>=0 and v<=maximum and math.floor(v) or 0
 end
 local function announce(prefix)
     local now=GetTime();if now-(lastSend[prefix] or -100)<3 then return end
     local map,level=own();if not map then return end
-    if locked() then return end
-    lastSend[prefix]=now
-    if prefix=="LibKS" then
-        local info=call(C_PlayerInfo and C_PlayerInfo.GetPlayerMythicPlusRatingSummary,"player")
-        local rating=public(info) and type(info)=="table" and info.currentSeasonScore or nil
-        rating=public(rating) and type(rating)=="number" and rating>=0 and rating<100000 and math.floor(rating) or 0
-        send(prefix,string.format("%d,%d,%d",level,map,rating))
-    else send(prefix,string.format("KSGL:Send:%d:%d:0:0:0",map,level))end
+    if locked() or not P.Supports(prefix,channel()) then return end
+    local info=call(C_PlayerInfo and C_PlayerInfo.GetPlayerMythicPlusRatingSummary,"player")
+    local rating=public(info) and type(info)=="table" and info.currentSeasonScore or nil
+    rating=public(rating) and type(rating)=="number" and rating>=0 and rating<100000 and math.floor(rating) or 0
+    local data={map=map,level=level,rating=rating}
+    if prefix=="LRS" then
+        local _,_,classID=call(UnitClass,"player")
+        local spec=call(GetSpecialization)
+        data.classID=number(classID,100)
+        data.specID=spec and number(call(GetSpecializationInfo,spec),99999) or 0
+        data.worldMap=map~=0 and number(call(C_MythicPlus and C_MythicPlus.GetOwnedKeystoneMapID),999999) or 0
+    end
+    if send(prefix,P.Key(prefix,data)) then
+        lastSend[prefix]=now;lastOwn[prefix]=map..":"..level;return true
+    end
 end
 local function updateOwn()
     local map,level=own();if not map then return end
     local key=map..":"..level
     if locked() then return end
     for _,prefix in ipairs(prefixes)do
-        if lastOwn[prefix]~=key then
+        if P.Supports(prefix,channel()) and lastOwn[prefix]~=key then
             if GetTime()-(lastSend[prefix] or -100)>=3 then
-                announce(prefix);lastOwn[prefix]=key
+                if announce(prefix) then lastOwn[prefix]=key end
             elseif not ownQueued then
                 ownQueued=true;local generation=epoch
                 C_Timer.After(3.1,function()
@@ -114,7 +130,7 @@ function K.Request()
     rebuild();changed()
     if not channel() or locked() or GetTime()-lastRequest<5 then return end
     lastRequest=GetTime()
-    send("LibKS","R");send("WA-KeyStGrList","KSGL:Request:0")
+    for _,prefix in ipairs(prefixes)do send(prefix,P.Request(prefix))end
     for _,prefix in ipairs(prefixes)do announce(prefix)end
 end
 local function store(row,map,level,source)
@@ -123,19 +139,23 @@ local function store(row,map,level,source)
     cache[row.guid]={mapID=map,level=level,time=GetTime(),source=source}
     changed()
 end
+-- Decode only current peers, with a bounded token bucket per GUID. OpenRaid also
+-- carries unrelated gear/cooldown traffic; never spend unbounded time inflating it.
+local function canDecode(row)
+    local now=GetTime();local budget=decodeBudget[row.guid] or {tokens=24,time=now}
+    budget.tokens=math.min(24,budget.tokens+math.max(0,now-budget.time)*8);budget.time=now
+    decodeBudget[row.guid]=budget
+    if budget.tokens<1 then return false end
+    budget.tokens=budget.tokens-1;return true
+end
 local function receive(prefix,message,ch,sender)
-    if not active() or not str(prefix) or not str(message) or not str(ch) or #message>100 then return end
-    if ch~=channel() then return end
+    if not active() or not str(prefix) or not str(message) or not str(ch) or #message>(prefix=="LRS" and 255 or 100) then return end
+    if ch~=channel() or not P.Supports(prefix,ch) then return end
     rebuild();local row=member(sender);if not row or not row.online then return end
-    if prefix=="LibKS" then
-        if message=="R" then announce(prefix);return end
-        local level,map=message:match("^(%d+),(%d+),%d+$")
-        if map then store(row,map,level,"队友同步")end
-    elseif prefix=="WA-KeyStGrList" then
-        if message=="KSGL:Request:0" then announce(prefix);return end
-        local map,level=message:match("^KSGL:Send:(%d+):(%d+):%d+:%d+:%d+$")
-        if map then store(row,map,level,"队友同步")end
-    end
+    if prefix=="LRS" and not canDecode(row) then return end
+    local kind,map,level=P.Read(prefix,message)
+    if kind=="request" then announce(prefix)
+    elseif kind=="key" then store(row,map,level,"队友同步")end
 end
 function K.Snapshot()
     if not active() then return {} end
@@ -152,7 +172,7 @@ function K.Snapshot()
     return result
 end
 function K.Stop()
-    running=false;frame:UnregisterAllEvents();cache={};roster={};signature="";lastRequest=-100;lastSend={}
+    running=false;frame:UnregisterAllEvents();cache={};roster={};signature="";lastRequest=-100;lastSend={};decodeBudget={}
     epoch=epoch+1;ownQueued=false;lastOwn={}
     changed()
 end
@@ -177,14 +197,14 @@ frame:SetScript("OnEvent",function(_,event,...)
         rebuild();local row=member(sender);if not row then return end
         local map,level=message:match("|Hkeystone:%d+:(%d+):(%d+):")
         if map then store(row,map,level,"队友分享的钥石链接")end
-    elseif event=="PLAYER_LEAVING_WORLD" then cache={};changed()
+    elseif event=="PLAYER_LEAVING_WORLD" then cache={};decodeBudget={};changed()
     elseif event=="CHALLENGE_MODE_START" then cache={};changed()
     elseif event=="GROUP_ROSTER_UPDATE" then
         if rebuild() then lastRequest=-100;K.Request()end
     elseif event=="BAG_UPDATE_DELAYED" then
         updateOwn()
     else
-        if event=="PLAYER_ENTERING_WORLD" or event=="CHALLENGE_MODE_COMPLETED" then cache={};lastRequest=-100 end
+        if event=="PLAYER_ENTERING_WORLD" or event=="CHALLENGE_MODE_COMPLETED" then cache={};decodeBudget={};lastRequest=-100 end
         K.Request()
         if event=="CHALLENGE_MODE_COMPLETED" then
             local generation=epoch

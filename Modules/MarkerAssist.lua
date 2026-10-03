@@ -51,7 +51,7 @@ local function ready()
 end
 local function text(parent,value,size,role)
     local f=parent:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-    f:SetFont(GameFontNormal:GetFont(),size or 11,"");f:SetText(value)
+    UI.SetRuntimeFont(f,GameFontNormal:GetFont(),size or 11);f:SetText(value)
     UI.StyleText(f,role or "text");return f
 end
 local function skin(f)
@@ -95,6 +95,7 @@ local function action(label,x,width,callback,tip)
     local b=CreateFrame("Button",nil,bar,"UIPanelButtonTemplate")
     b:SetSize(width,24);b:SetPoint("TOPLEFT",x,-86);b:SetText(label)
     UI.SkinTextButton(b);UI.StyleText(b:GetFontString(),"text")
+    UI.RegisterRuntimeFont(b:GetFontString())
     b:SetScript("OnClick",callback);tooltip(b,tip or label);return b
 end
 local function position()
@@ -122,6 +123,7 @@ local function build()
     local config=CreateFrame("Button",nil,bar,"UIPanelButtonTemplate")
     config:SetSize(44,18);config:SetPoint("TOPRIGHT",-8,-4);config:SetText("设置")
     UI.SkinTextButton(config);UI.StyleText(config:GetFontString(),"muted")
+    UI.RegisterRuntimeFont(config:GetFontString())
     config:SetScript("OnClick",function()ns.OpenOptions("smalltools")end)
     bar.targetLabel=text(bar,"目标",11,"muted")
     bar.worldLabel=text(bar,"地面",11,"muted")
