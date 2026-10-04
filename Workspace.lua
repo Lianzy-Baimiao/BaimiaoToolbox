@@ -96,8 +96,9 @@ local descriptions = {
     rotation="技能循环与冷却提示。",
     mythicplus="副本成绩、记录与手动传送。",
     smalltools="右键操作、进本与排队提醒、交易回执。",
+    auctionhouse="快捷搜索、清单与追踪配方补货。",
 }
-local icons={135802,132261,135940,136012,135959,525134,133742}
+local icons={135802,132261,135940,136012,135959,525134,133742,133784}
 local function combatMessage()
     if InCombatLockdown() then
         ns.Print("战斗中暂不修改工具箱配置；请脱战后再试。")
@@ -358,7 +359,13 @@ function UI.BuildWorkspace()
     workspace:SetScript("OnEvent",function(_,event)
         if event=="DISPLAY_SIZE_CHANGED" or event=="UI_SCALE_CHANGED" then fitWindow() else syncCombat() end
     end)
-    workspace:SetScript("OnShow",function() fitWindow();syncCombat();selectPage(current) end)
+    workspace:SetScript("OnShow",function()
+        fitWindow();syncCombat();selectPage(current)
+        if ns.AuctionHouse and ns.AuctionHouse.OnWorkspaceShow then ns.AuctionHouse.OnWorkspaceShow()end
+    end)
+    workspace:SetScript("OnHide",function()
+        if ns.AuctionHouse and ns.AuctionHouse.OnWorkspaceHide then ns.AuctionHouse.OnWorkspaceHide()end
+    end)
     applyTheme();selectPage("overview");syncCombat();fitWindow()
     -- Keep the standard Blizzard Settings entry without constructing options twice.
     if Settings and Settings.RegisterCanvasLayoutCategory then

@@ -24,6 +24,14 @@ A modular utility addon for World of Warcraft Retail. Keep useful shortcuts, rem
 - **Party keystones:** Show shared keys from current party members. Supports LibKeystone, Keystone Group List, AngryKeystones, and LibOpenRaid-compatible messages, plus actual keystone links shared by party members. Availability depends on the sender's addon and supported message channel; the addon cannot inspect another player's bags.
 - **Marker assistant:** Target markers, world markers, ready checks, and native group countdowns, subject to game permissions.
 
+## Auction House companion
+
+- **Quick search:** 85 built-in presets across 11 visible categories, including profession missives, plus your own favorites. Search by name, item link, or item ID. Color-coded Chinese stat abbreviations help identify flasks, potions, gems, enchants, and missives.
+- **Restock lists:** Save multiple plans with target quantities, optional per-item price caps, and a session budget. Disabled entries stay out of the shopping list; each row has a search button for checking the item in Blizzard's Auction House.
+- **Tracked recipes:** Build a shopping list from tracked crafting and recrafting recipes. Choose all recipes or one recipe, crafting count, and material quality. Defaults to the highest available material quality; lower preferences use the material's actual tiers. Shared materials are combined and matching-quality bag/bank inventory and known incoming mail are counted. Optional reagents, sparks, currencies, and finished-item quality are not selected or guaranteed.
+- **Click-to-buy, not unattended automation:** The helper looks up prices automatically, but each item requires a purchase click. Confirmation proceeds only if the final quote does not exceed the quantity/amount authorized by that click; the next item is then queried, not automatically purchased. Only commodity purchases are supported. Leaving a price cap or budget at zero means no configured cap. Game restrictions still apply.
+- **Integrated panel:** Open with **/bmah**, or configure through **/bm → 拍卖行助手**. The light/dark companion panel follows the native Auction House's movement, height, and frame layer. Settings and the companion do not overlap. No Yishier dependency.
+
 ## Make it yours
 
 Open the workspace with **/bm** or the minimap button. Modules can be switched on or off individually, and the workspace has light and dark themes. A separate appearance page controls font outlines for the addon's non-settings text without changing Blizzard UI or other addons.
@@ -34,7 +42,7 @@ Feature settings are account-wide; frame positions and lock settings are saved p
 
 Install the addon for your **Retail** game instance. For manual installation, place the **BaimiaoToolbox** folder in `World of Warcraft/_retail_/Interface/AddOns/`, with `BaimiaoToolbox.toc` directly inside it.
 
-When upgrading from **1.9.14 or earlier to 1.9.15**, fully exit the game before installation and restart it afterward to load the new files. Keep your SavedVariables; no settings reset is required.
+When upgrading from **1.9.15 or earlier to 1.9.16**, fully exit the game before installation and restart it afterward to load the new files. Keep your SavedVariables; no settings reset is required.
 
 ## Compatibility and limits
 
@@ -84,6 +92,14 @@ The addon's own code is MIT-licensed; see LICENSE. The bundled modified LibDefla
 - **队友钥石：**展示当前小队成员分享的钥石，支持 LibKeystone、Keystone Group List、AngryKeystones 与 LibOpenRaid 兼容消息，以及队友发送的真实钥石链接。是否能获取取决于对方插件和消息频道，不会直接读取其他玩家的背包。
 - **标记助手：**目标标记、地面标记、就位确认和原生团队倒数，遵守游戏权限限制。
 
+### 拍卖行助手
+
+- **快捷搜索：**85 项内置预设、11 个直接可见的分类，包含公函；个人收藏独立管理，支持名称、链接和物品 ID 搜索。合剂、药水、宝石、附魔与公函显示彩色属性简写。
+- **清单补货：**多套方案、目标库存、可选单项限价和本次预算。停用项目不占购买列表，每项都有搜索按钮，方便在原生拍卖行查看。
+- **追踪补货：**读取普通制作及再造的追踪配方，可选全部或单个配方、制作份数和材料品质，默认材料实际最高品质。合并相同材料，按所选品质扣除背包、银行可见库存与已知邮件；不代选可选材料、火花和货币，不保证成品品质。普通清单不计银行。
+- **每项点一次购买，不是无人值守：**自动查询价格；点击购买后，最终报价不高于本次授权金额才确认，成功后只查询下一项，不自动开始下一笔付款。仅支持商品类物品，限价 / 预算留空或 0 为不限，仍遵守游戏限制。
+- **独立面板：**输入 **/bmah** 打开，或通过 **/bm → 拍卖行助手** 设置。支持深浅主题，在原生拍卖行右侧跟随移动、同步高度和层级；打开设置时隐藏助手，避免交叉显示。不依赖 Yishier。
+
 ### 按自己的习惯设置
 
 输入 **/bm** 或点击小地图按钮打开工作台，各模块可独立开关，提供深浅两种主题。独立的外观设置统一控制插件非设置界面的轮廓字体，不影响游戏原生界面或其他插件。
@@ -94,7 +110,7 @@ The addon's own code is MIT-licensed; see LICENSE. The bundled modified LibDefla
 
 请安装到**正式服**客户端。手动安装时，将 **BaimiaoToolbox** 文件夹放入 `World of Warcraft/_retail_/Interface/AddOns/`，确保 `BaimiaoToolbox.toc` 直接位于该文件夹内。
 
-从 **1.9.14 或更早版本升级到 1.9.15** 时，请完全退出游戏后安装，再重新进入，以加载新增文件。保留 SavedVariables，无需清空或重置设置。
+从 **1.9.15 或更早版本升级到 1.9.16** 时，请完全退出游戏后安装，再重新进入，以加载新增文件。保留 SavedVariables，无需清空或重置设置。
 
 ### 兼容性与限制
 

@@ -7,7 +7,7 @@
 ## SavedVariables: BaimiaoToolboxDB
 ## SavedVariablesPerCharacter: BaimiaoToolboxDBPC
 ## OptionalDeps: LibSharedMedia-3.0
-## Version: 1.9.15
+## Version: 1.9.16
 ## IconTexture: Interface\AddOns\BaimiaoToolbox\media\cat_icon.tga
 
 Core.lua
@@ -30,3 +30,8 @@ Modules\MythicPlus.lua
 Modules\MarkerAssist.lua
 Modules\SmallToolsExtras.lua
 Modules\SmallTools.lua
+
+Modules\AuctionHouseData.lua
+Modules\AuctionHouseRecipes.lua
+Modules\AuctionHouse.lua
+Modules\AuctionHouseUI.lua

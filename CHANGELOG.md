@@ -1,3 +1,57 @@
+## 1.9.16 — 2026-10-05
+
+Upgrade notes: 1.9.15 → 1.9.16 · 2026-10-05
+
+## English
+
+### New Auction House companion
+
+- Added a dedicated settings page and **/bmah** panel with light/dark themes; no Yishier dependency.
+- Quick search includes **85 presets in 11 visible categories**, including profession missives. Personal favorites have their own list and count. Flasks, potions, gems, enchants, and missives display color-coded Chinese stat abbreviations.
+- Save multiple restock plans with target quantities, optional per-item price caps, and a session budget. Disabled entries are hidden from shopping lists, not deleted from settings. A cap/budget of zero means no configured limit.
+- **Tracked-recipe restocking** reads tracked crafting/recrafting recipes. Choose all or one recipe, craft count, and material quality; the default is the highest tier actually available. Duplicate materials are merged, with matching-quality bag/bank inventory and known incoming mail deducted. Optional reagents, sparks, currencies, and finished-item quality are not selected or guaranteed. Manual restock plans do not count bank inventory.
+- Prices are queried automatically, but **each item requires a purchase click**. A final quote is confirmed only within the amount authorized by that click. After success, the next item is queried without starting another purchase. Supports commodities only, not unattended buying. Price increases, expired quotes, and insufficient funds do not submit an order; unresolved orders keep their in-transit quantities to reduce duplicate purchases.
+
+### Usability and presentation
+
+- Each manual/tracked restock row has a search button that opens the native buying page and clears stale categories/filters, without purchasing. Search buttons have no verbose hover text; material-quality help uses three short lines.
+- Quality labels use native reagent icons and actual tiers rather than assuming a gold icon means five stars.
+- The companion docks to the Auction House's right side and follows movement, height, scale, and frame layer. Dragging preserves its relative offset. Opening settings hides the companion until settings close.
+
+### Install and compatibility
+
+- Fully exit the game, install the **BaimiaoToolbox** folder from **BaimiaoToolbox-1.9.16.zip** into `World of Warcraft/_retail_/Interface/AddOns/`, then restart to load the new modules. Do not use GitHub's automatic Source code archives as the addon package.
+- Keep existing SavedVariables; no settings reset is required. Retail only; the in-game interface remains Simplified Chinese only. No required external addon and no bundled audio.
+- Game restrictions still apply. Automatic quote confirmation and rendering across other addons need in-game verification; try small quantities of low-cost materials first.
+
+**Validation:** 459 offline tests and Lua 5.1 syntax checks for all 19 runtime Lua files passed. These checks do not replace live-client acceptance.
+
+---
+
+## 中文
+
+### 新增拍卖行助手
+
+- 新增独立设置页及 **/bmah** 面板，支持深浅主题，不依赖 Yishier。
+- 快捷搜索提供 **85 项预设、11 个直接可见的分类**，新增公函；个人收藏独立管理与计数。合剂、药水、宝石、附魔和公函显示彩色属性简写。
+- 清单补货支持多套方案、目标库存、可选单项限价和本次预算。停用项目不再占购买列表，仍可在设置中启用；限价 / 预算为 0 表示不限。
+- **追踪配方补货**读取普通制作及再造的追踪配方，可选全部或单个配方、制作份数与材料品质，默认材料实际最高档。合并重复材料，按精确品质扣除背包、银行可见库存及已知邮件；不代选可选材料、火花和货币，不保证成品品质。普通清单不计银行。
+- 自动查询价格，**每项点一次购买**；最终报价不高于本次点击授权金额才确认，成功后只查询下一项，不自动开始下一笔付款。仅支持商品类物品，不是无人值守购买；涨价、过期或余额不足时不提交。真实未决订单保留在途数量，降低重复采购风险。
+
+### 交互与显示优化
+
+- 两种补货清单每行均有搜索按钮：打开原生购买页并清除旧分类 / 筛选，只搜索、不购买。搜索按钮移除啰嗦的鼠标说明，品质提示压缩为三行。
+- 材料品质使用客户端原生图标和实际档位，不再将金色图标误写为五星。
+- 助手默认贴在拍卖行右侧，同步移动、高度、缩放和窗口层级；拖动后保留相对偏移。打开设置时隐藏助手，关闭设置后恢复，避免交叉显示。
+
+### 安装与兼容性
+
+- 完全退出游戏，将 **BaimiaoToolbox-1.9.16.zip** 中的 **BaimiaoToolbox** 文件夹安装到 `World of Warcraft/_retail_/Interface/AddOns/`，再重新启动以加载新增模块。不要使用 GitHub 自动生成的 Source code 压缩包安装。
+- 保留 SavedVariables，无需清空设置。仅面向正式服，游戏内界面仍仅提供简体中文；无需必装的外部插件，安装包不含音频。
+- 仍遵守游戏限制。报价自动确认及跨插件显示效果需游戏内验证，首次建议少量低价材料试用。
+
+**验证：**459 项离线测试及全部 19 个运行 Lua 文件的 Lua 5.1 语法检查通过，不代替真实客户端验收。
+
 ## 1.9.15 — 2026-10-04
 
 Upgrade notes: 1.9.14 → 1.9.15 · 2026-10-04
