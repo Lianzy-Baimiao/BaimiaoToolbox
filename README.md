@@ -1,7 +1,7 @@
 # 白描工具箱 · Baimiao Toolbox
+[![许可 MIT](https://img.shields.io/badge/许可-MIT-blue?style=flat-square)](LICENSE) [![赞赏 爱发电](https://img.shields.io/badge/赞赏-爱发电-946ce6?style=flat-square)](https://ifdian.net/a/lianzy)
 
-面向魔兽世界正式服的模块化工具箱：拍卖行搜索与补货、大秘境信息、日常快捷操作和屏幕提醒，集中在一个工作台，按需启用。
-A modular toolkit for WoW Retail: Auction House restocking, Mythic+ information, everyday shortcuts, and reminders.
+面向魔兽世界正式服的模块化工具箱：拍卖行搜索与补货、大秘境信息、日常快捷操作和屏幕提醒，集中在一个工作台，按需启用。 A modular toolkit for WoW Retail: Auction House restocking, Mythic+ information, everyday shortcuts, and reminders.
 
 [下载最新版本](https://github.com/Lianzy-Baimiao/BaimiaoToolbox/releases/latest) · [CurseForge](https://www.curseforge.com/wow/addons/baimiaotoolbox) · [更新日志](CHANGELOG.md) · [完整功能说明 / Description](BaimiaoToolbox_Description.txt) · [问题反馈](https://github.com/Lianzy-Baimiao/BaimiaoToolbox/issues)
 **简体中文 / 繁體中文 / English / 한국어**：自动跟随客户端，其他客户端语言回退英文；独立语言文件位于 `Locales/`。支持深浅主题与插件文字轮廓设置，不修改其他插件字体。
