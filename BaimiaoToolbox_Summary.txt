@@ -1,1 +1,1 @@
-拍卖行搜索与补货、大秘境信息和日常便捷工具，模块按需启用。 Modular WoW Retail utilities: Auction House restocking, Mythic+ tools, shortcuts and reminders.
+Modular WoW Retail utilities: Auction House restocking, Mythic+ tools, shortcuts and reminders. 拍卖行搜索与补货、大秘境信息和日常便捷工具，模块按需启用。

@@ -2,35 +2,7 @@
 
 Upgrade notes: 1.9.17 → 1.9.18
 
-## 中文
-
-### 设置界面
-- 重组多个模块的设置分组与折叠区域，减少重复标题，明确显示、外观和行为选项的层次。
-- 单行输入框回车或失焦保存；多行编辑保留显式保存，减少重复操作提示。
-- 工作台及模块设置页按需创建，不再登录时一次构建全部设置界面。
-
-### 拍卖行与内存
-- 合并突发物品信息刷新，仅处理助手实际请求的数据，避免无关物品事件反复重建界面。
-- 追踪配方只在相关未就绪材料信息到达时失效缓存；背包变化优先更新库存显示。
-- 减少重复打开拍卖行时的列表、回调和临时对象分配，复用可复用的显示与采样数据。
-
-### 后台刷新与诊断
-- 坐标和嗜血监控改用有生命周期管理的定时刷新，停用时取消相应计时器；减少部分模块的重复显示写入与临时分配。
-- 快捷按钮跳过重复清空和未变化的公开数值冷却写入，保留查询频率、失败重试和受限数据处理。
-- 嗜血在脱战且非地下城/团队副本时短暂复用成功的“无光环”查询；相关事件立即失效，保留定时兜底。确定无关的公开增量光环事件可跳过全量刷新；移除、完整更新及不确定数据仍走原流程。
-- 新增按需运行的 /bmperf：30 秒内分别采集原生近期指标与指定回调耗时，包含事件明细和快捷冷却内部刷新。/bmperf cancel 可取消，进入战斗自动结束；结果不写入存档。
-- 原生百分比受分母与滚动窗口影响；诊断并不覆盖所有回调。此次不承诺固定内存上限或 CPU 降幅。
-
-### 安装与验证
-- 完全退出游戏后覆盖安装 BaimiaoToolbox 文件夹，再启动游戏，以加载新增 Diagnostics.lua。保留 SavedVariables，无需重置设置。
-- 正式服；简体中文、繁体中文、英文和韩语。新增设置与诊断文字同步本地化。
-- 593 项离线测试及 25 个运行 Lua 文件的 Lua 5.1 语法检查通过；离线验证不能代替全部客户端、战斗限制和插件组合的实机验证。
-- 拍卖行购买仍需逐项点击，不是无人值守购买；不附带音乐文件。
-
----
-
 ## English
-
 ### Settings
 - Reorganized settings groups and collapsible sections across several modules, reduced duplicate headings, and separated display, appearance, and behavior options.
 - Single-line fields save on Enter or focus loss; multiline editors retain explicit Save controls.
@@ -53,6 +25,32 @@ Upgrade notes: 1.9.17 → 1.9.18
 - Retail only; Simplified Chinese, Traditional Chinese, English, and Korean. New settings and diagnostic messages are localized.
 - 593 offline tests and Lua 5.1 syntax checks for all 25 runtime Lua files passed. Offline checks do not replace live-client testing across combat restrictions and addon combinations.
 - Auction purchases still require a click for each item; this is not unattended buying. No music files are bundled.
+
+---
+
+## 中文
+### 设置界面
+- 重组多个模块的设置分组与折叠区域，减少重复标题，明确显示、外观和行为选项的层次。
+- 单行输入框回车或失焦保存；多行编辑保留显式保存，减少重复操作提示。
+- 工作台及模块设置页按需创建，不再登录时一次构建全部设置界面。
+
+### 拍卖行与内存
+- 合并突发物品信息刷新，仅处理助手实际请求的数据，避免无关物品事件反复重建界面。
+- 追踪配方只在相关未就绪材料信息到达时失效缓存；背包变化优先更新库存显示。
+- 减少重复打开拍卖行时的列表、回调和临时对象分配，复用可复用的显示与采样数据。
+
+### 后台刷新与诊断
+- 坐标和嗜血监控改用有生命周期管理的定时刷新，停用时取消相应计时器；减少部分模块的重复显示写入与临时分配。
+- 快捷按钮跳过重复清空和未变化的公开数值冷却写入，保留查询频率、失败重试和受限数据处理。
+- 嗜血在脱战且非地下城/团队副本时短暂复用成功的“无光环”查询；相关事件立即失效，保留定时兜底。确定无关的公开增量光环事件可跳过全量刷新；移除、完整更新及不确定数据仍走原流程。
+- 新增按需运行的 /bmperf：30 秒内分别采集原生近期指标与指定回调耗时，包含事件明细和快捷冷却内部刷新。/bmperf cancel 可取消，进入战斗自动结束；结果不写入存档。
+- 原生百分比受分母与滚动窗口影响；诊断并不覆盖所有回调。此次不承诺固定内存上限或 CPU 降幅。
+
+### 安装与验证
+- 完全退出游戏后覆盖安装 BaimiaoToolbox 文件夹，再启动游戏，以加载新增 Diagnostics.lua。保留 SavedVariables，无需重置设置。
+- 正式服；简体中文、繁体中文、英文和韩语。新增设置与诊断文字同步本地化。
+- 593 项离线测试及 25 个运行 Lua 文件的 Lua 5.1 语法检查通过；离线验证不能代替全部客户端、战斗限制和插件组合的实机验证。
+- 拍卖行购买仍需逐项点击，不是无人值守购买；不附带音乐文件。
 
 ## 1.9.17 — 2026-10-05
 
