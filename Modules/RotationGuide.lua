@@ -1,11 +1,12 @@
 -- Editable skill-order cards with passive cooldown display; never cast or recommend.
 local ADDON, ns = ...
+local T = ns.L
 local ID = "rotation"
 local MAX_SLOTS = 6
 local presets = {
-    { name="惩戒骑 · 单体", sequence="20271 > 184575 > 31884 + 255937 > 343527 > 383328 > 375576 > 383328" },
-    { name="惩戒骑 · AOE 第一套", sequence="20271 > 184575 > 31884 + 255937 > 383328 + 53385*1-2 > 343527 > 375576" },
-    { name="惩戒骑 · AOE 第二套", sequence="20271 > 184575 > 31884 + 255937 > 343527 > 383328 > 375576 > 53385" },
+    { name=T["惩戒骑 · 单体"], sequence="20271 > 184575 > 31884 + 255937 > 343527 > 383328 > 375576 > 383328" },
+    { name=T["惩戒骑 · AOE 第一套"], sequence="20271 > 184575 > 31884 + 255937 > 383328 + 53385*1-2 > 343527 > 375576" },
+    { name=T["惩戒骑 · AOE 第二套"], sequence="20271 > 184575 > 31884 + 255937 > 343527 > 383328 > 375576 > 53385" },
 }
 local defaults = {
     show=true, showCooldowns=true, size=38, showNames=false,
@@ -19,7 +20,7 @@ local function freshRows(spec)
     local rows={}
     for i=1,MAX_SLOTS do
         local preset=spec==70 and presets[i]
-        rows[i]={enabled=false,name=preset and preset.name or ("方案 "..i),sequence=preset and preset.sequence or "",note="",showNote=false}
+        rows[i]={enabled=false,name=preset and preset.name or (T["方案 "]..i),sequence=preset and preset.sequence or "",note="",showNote=false}
     end
     return rows
 end
@@ -115,10 +116,10 @@ local function SymbolToken(token)
 end
 -- Explicit branch captions apply to the next skill only, never a live target
 -- condition. Both alternatives stay visible. Unknown words remain skill tokens.
-local BRANCH_LABELS={ ["单体"]="单体", ["aoe"]="AOE", ["群体"]="AOE" }
+local BRANCH_LABELS={ ["单体"]=T["单体"], ["單體"]=T["单体"], ["st"]=T["单体"], ["aoe"]="AOE", ["群体"]="AOE", ["群體"]="AOE" }
 local function Parse(value)
-    if type(value)~="string" then return nil,"请输入技能 ID 或名称。" end
-    if #value>2048 then return nil,"顺序过长（最多 2048 字节）。" end
+    if type(value)~="string" then return nil,T["请输入技能 ID 或名称。"] end
+    if #value>2048 then return nil,T["顺序过长（最多 2048 字节）。"] end
     -- Keep legacy compact sequences working; other separators must stand alone.
     value=value:gsub("→",">"):gsub("＞",">"):gsub("＋","+"):gsub("，",">")
         :gsub("　"," "):gsub("\194\160"," "):gsub("／","/"):gsub("([>+/])"," %1 ")
@@ -126,7 +127,7 @@ local function Parse(value)
     for raw in value:gmatch("%S+") do
         local caption=BRANCH_LABELS[raw:gsub("：$",""):gsub(":$",""):lower()]
         if caption then
-            if branch then return nil,"分支标注后请填写技能 ID 或名称。" end
+            if branch then return nil,T["分支标注后请填写技能 ID 或名称。"] end
             branch=caption
         elseif SymbolToken(raw) then
             -- Preserve alternative '/' and legacy grouped '+' presentation.
@@ -139,26 +140,26 @@ local function Parse(value)
                 local lo,hi=count:match("^(%d+)%-(%d+)$")
                 if not lo then lo=count:match("^(%d+)$");hi=lo end
                 if not lo or tonumber(lo)<1 or tonumber(hi)>9 or tonumber(lo)>tonumber(hi) then
-                    return nil,"次数写法应为技能后紧跟 *1 至 *9，或 *1-2 这样的范围。"
+                    return nil,T["次数写法应为技能后紧跟 *1 至 *9，或 *1-2 这样的范围。"]
                 end
             end
-            if skill=="" or skill:find("|",1,true) then return nil,"技能名称不能包含 |，请使用技能 ID 或纯文本名称。" end
+            if skill=="" or skill:find("|",1,true) then return nil,T["技能名称不能包含 |，请使用技能 ID 或纯文本名称。"] end
             local number=tonumber(skill)
             if number and (number<1 or number~=math.floor(number) or number>2147483647) then
-                return nil,"技能 ID 必须是有效的正整数。"
+                return nil,T["技能 ID 必须是有效的正整数。"]
             end
             if #out==0 or join~="+" then step=step+1 end
             out[#out+1]={spell=number or skill,count=count,step=step,join=join,branch=branch}
             join=">";branch=nil
         end
     end
-    if branch then return nil,"分支标注后请填写技能 ID 或名称。" end
+    if branch then return nil,T["分支标注后请填写技能 ID 或名称。"] end
     return out,nil
 end
 local fallbackNames={
-    [20271]="审判",[184575]="公正之剑",[31884]="复仇之怒",
-    [255937]="灰烬觉醒",[343527]="处决宣判",[383328]="最终审判",
-    [375576]="圣洁鸣钟",[53385]="神圣风暴",
+    [20271]=T["审判"],[184575]=T["公正之剑"],[31884]=T["复仇之怒"],
+    [255937]=T["灰烬觉醒"],[343527]=T["处决宣判"],[383328]=T["最终审判"],
+    [375576]=T["圣洁鸣钟"],[53385]=T["神圣风暴"],
 }
 local function Resolve(spell)
     local ok,info=false,nil
@@ -185,12 +186,16 @@ local function paint()
         f.card:SetShown(not (DB().hideBackgroundLocked and f:IsLocked()))
         f.card:SetBackdropColor(p.card[1],p.card[2],p.card[3],DB().opacity)
         f.card:SetBackdropBorderColor(unpack(p.border))
-        f.title:SetTextColor(unpack(p.accent))
-        f.note:SetTextColor(unpack(p.text))
+        -- Text on a light card must not inherit the outline used over the world.
+        -- Hidden/mostly transparent cards keep light overlay text and the user's
+        -- outline preference. Icon badges, charges and cooldowns stay untouched.
+        local overWorld = not f.card:IsShown() or DB().opacity < 0.5
+        ns.UI.StyleText(f.title,"accent",overWorld)
+        ns.UI.StyleText(f.note,"text",overWorld)
         for _,cell in ipairs(f.cells) do
-            cell.name:SetTextColor(unpack(p.text))
-            cell.connector:SetTextColor(unpack(p.accent))
-            cell.branch:SetTextColor(unpack(p.accent))
+            ns.UI.StyleText(cell.name,"text",overWorld)
+            ns.UI.StyleText(cell.connector,"accent",overWorld)
+            ns.UI.StyleText(cell.branch,"accent",overWorld)
         end
     end
 end
@@ -223,8 +228,8 @@ local function createRow(index)
     end)
     f.close:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:SetText("隐藏此方案")
-        GameTooltip:AddLine("仅关闭这一条，不删除配置。可在方案编辑页重新勾选。",1,1,1,true)
+        GameTooltip:SetText(T["隐藏此方案"])
+        GameTooltip:AddLine(T["仅关闭这一条，不删除配置。可在方案编辑页重新勾选。"],1,1,1,true)
         GameTooltip:Show()
     end)
     f.close:SetScript("OnLeave",hideTip);f.close:SetScript("OnHide",hideTip)
@@ -299,7 +304,7 @@ local function createCell(f)
         if id then ok=pcall(GameTooltip.SetSpellByID,GameTooltip,id) end
         if not ok then
             GameTooltip:SetText(literal(cell.displayName))
-            GameTooltip:AddLine("未能读取技能详情，请检查技能 ID 或名称。",1,0.75,0.4,true)
+            GameTooltip:AddLine(T["未能读取技能详情，请检查技能 ID 或名称。"],1,0.75,0.4,true)
         end
         GameTooltip:Show()
     end)
@@ -401,15 +406,15 @@ Refresh=function()
 end
 local function Status(i)
     local nodes,err=Parse(EditorRows()[i].sequence)
-    if err then return "|cffff7070"..err.."|r" end
-    if #nodes==0 then return "尚未配置技能；空方案不会显示。" end
+    if err then return err, "danger" end
+    if #nodes==0 then return T["尚未配置技能；空方案不会显示。"] end
     local missing={}
     for _,node in ipairs(nodes) do
         local _,name,valid=Resolve(node.spell)
         if not valid then missing[#missing+1]=literal(name) end
     end
-    if #missing>0 then return "|cffffb65c未识别："..table.concat(missing,"、",1,math.min(2,#missing))..(#missing>2 and " 等" or "").."（显示问号，请检查 ID / 名称）|r" end
-    return #nodes.." 个技能图标 · 顺序有效"
+    if #missing>0 then return T["未识别："]..table.concat(missing,"、",1,math.min(2,#missing))..(#missing>2 and T[" 等"] or "")..T["（显示问号，请检查 ID / 名称）"], "warning" end
+    return #nodes..T[" 个技能图标 · 顺序有效"]
 end
 local function SetSequence(i,value)
     -- Preserve invalid user text for correction rather than pretending it saved
@@ -421,33 +426,33 @@ local function BuildOptions(panel,m,L)
     local _,_,classID=UnitClass("player")
     editorClass=classID
     editorSpec=CurrentSpec() or (Specs(classID)[1] or {}).value or 70
-    L:Title("循环提示助手")
-    L:Text("选择方案、调整外观，或查看配置写法。技能顺序由你决定，冷却实时显示。",true)
+    L:Title(T["循环提示助手"])
+    L:Text(T["选择方案、调整外观，或查看配置写法。技能顺序由你决定，冷却实时显示。"],true)
     local entries={
-        {name="显示与布局",width=150,build=function(_,L)
-    L:Section("显示与摆放")
-    L:Check("显示循环提示助手",function() return DB().show end,function(v) DB().show=v end,Refresh)
-    L:Text("自动显示当前职业专精的已勾选方案；切换专精自动换条。编辑其他专精不会改变屏幕上的方案。",true)
-    L:Check("锁定所有顺序卡片（锁定后鼠标穿透，不挡战斗操作）",
+        {name=T["显示与布局"],width=150,build=function(_,L)
+    L:Section(T["显示与摆放"])
+    L:Check(T["显示循环提示助手"],function() return DB().show end,function(v) DB().show=v end,Refresh)
+    L:Text(T["自动显示当前职业专精的已勾选方案；切换专精自动换条。编辑其他专精不会改变屏幕上的方案。"],true)
+    L:Check(T["锁定所有顺序卡片（锁定后鼠标穿透，不挡战斗操作）"],
         function() return Layout().locked~=false end,
         function(v)
             Layout().locked=v
             for i=1,MAX_SLOTS do ns.GetLayoutDB(ID..i).locked=v end
         end,Refresh)
-    L:Text("在「方案编辑」勾选方案。解锁后可拖动卡片、悬停查看技能、点击右上角 x 隐藏单条；锁定后完全鼠标穿透。",true)
-    L:Check("锁定后隐藏背景与边框",function() return DB().hideBackgroundLocked end,
+    L:Text(T["在「方案编辑」勾选方案。解锁后可拖动卡片、悬停查看技能、点击右上角 x 隐藏单条；锁定后完全鼠标穿透。"],true)
+    L:Check(T["锁定后隐藏背景与边框"],function() return DB().hideBackgroundLocked end,
         function(v) DB().hideBackgroundLocked=v end,Refresh)
-    L:Text("隐藏背景不影响图标、冷却和文字；解锁后恢复背景，方便定位与拖动。",true)
-    L:Slider("BaimiaoRotationScale","整体缩放（%）",50,200,5,function() return DB().scalePercent end,
+    L:Text(T["隐藏背景不影响图标、冷却和文字；解锁后恢复背景，方便定位与拖动。"],true)
+    L:Slider("BaimiaoRotationScale",T["整体缩放（%）"],50,200,5,function() return DB().scalePercent end,
         function(v) DB().scalePercent=v end,Refresh)
-    L:Check("显示技能冷却与充能",function() return DB().showCooldowns end,function(v) DB().showCooldowns=v end,Refresh)
-    L:Text("冷却圈和倒计时由游戏绘制；充能数可读取时显示在右上角。冷却不代表距离、资源或其他施放条件。",true)
-    L:Check("显示方案名称",function() return DB().showTitles end,function(v) DB().showTitles=v end,Refresh)
-    L:Check("在图标下显示技能名称",function() return DB().showNames end,function(v) DB().showNames=v end,Refresh)
-    L:Slider("BaimiaoRotationSize","图标大小",24,64,1,function() return DB().size end,function(v) DB().size=v end,Refresh)
-    L:Text("技能始终单行排列，不按数量换行；超出屏幕宽度时自动整体缩小，未超出时使用设定缩放。",true)
-    L:Slider("BaimiaoRotationOpacity","卡片背景不透明度",0,1,0.05,function() return DB().opacity end,function(v) DB().opacity=v end,Refresh)
-    L:Button(140,"重置卡片位置",function()
+    L:Check(T["显示技能冷却与充能"],function() return DB().showCooldowns end,function(v) DB().showCooldowns=v end,Refresh)
+    L:Text(T["冷却圈和倒计时由游戏绘制；充能数可读取时显示在右上角。冷却不代表距离、资源或其他施放条件。"],true)
+    L:Check(T["显示方案名称"],function() return DB().showTitles end,function(v) DB().showTitles=v end,Refresh)
+    L:Check(T["在图标下显示技能名称"],function() return DB().showNames end,function(v) DB().showNames=v end,Refresh)
+    L:Slider("BaimiaoRotationSize",T["图标大小"],24,64,1,function() return DB().size end,function(v) DB().size=v end,Refresh)
+    L:Text(T["技能始终单行排列，不按数量换行；超出屏幕宽度时自动整体缩小，未超出时使用设定缩放。"],true)
+    L:Slider("BaimiaoRotationOpacity",T["卡片背景不透明度"],0,1,0.05,function() return DB().opacity end,function(v) DB().opacity=v end,Refresh)
+    L:Button(140,T["重置卡片位置"],function()
         for i=1,MAX_SLOTS do
             local pos=ns.GetLayoutDB(ID..i)
             pos.point,pos.relPoint,pos.x,pos.y="CENTER","CENTER",0,140-(i-1)*100
@@ -456,29 +461,29 @@ local function BuildOptions(panel,m,L)
     end)
 
         end},
-        {name="方案编辑",width=150,build=function(panel,L,onResize)
+        {name=T["方案编辑"],width=150,build=function(panel,L,onResize)
             local function syncEditor() L:SyncAll() end
             -- Explicitly commit focus before changing profile so edits cannot land in another spec.
             local function commitFocus()
                 local focus=GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
                 if focus and focus.ClearFocus then focus:ClearFocus() end
             end
-            m.rotationClassSelect=L:Dropdown(280,"职业：",Classes,function() return editorClass end,function(v)
+            m.rotationClassSelect=L:Dropdown(280,T["职业："],Classes,function() return editorClass end,function(v)
                 commitFocus();editorClass=v;editorSpec=(Specs(v)[1] or {}).value or editorSpec
             end,syncEditor)
-            m.rotationSpecSelect=L:Dropdown(280,"专精：",function() return Specs(editorClass) end,function() return editorSpec end,function(v)
+            m.rotationSpecSelect=L:Dropdown(280,T["专精："],function() return Specs(editorClass) end,function() return editorSpec end,function(v)
                 commitFocus();editorSpec=v
             end,syncEditor)
             m.rotationSpecSelect:ClearAllPoints()
             m.rotationSpecSelect:SetPoint("LEFT",m.rotationClassSelect,"RIGHT",12,0)
             L:step(-30)
-            local currentButton=L:Button(180,"编辑当前角色专精",function()
+            local currentButton=L:Button(180,T["编辑当前角色专精"],function()
                 commitFocus()
                 local _,_,id=UnitClass("player")
                 editorClass=id;editorSpec=CurrentSpec() or (Specs(id)[1] or {}).value or editorSpec
                 syncEditor()
             end)
-            L:Button(240,"从旧版恢复到空方案槽",function()
+            L:Button(240,T["从旧版恢复到空方案槽"],function()
                 commitFocus()
                 local old=DB().legacyRows
                 if not old then return end
@@ -489,31 +494,31 @@ local function BuildOptions(panel,m,L)
                 end
                 Refresh();syncEditor()
             end,true,currentButton)
-            L:Text("各专精独立保存 6 套方案；编辑选择不影响屏上匹配。旧版恢复仅填入对应的空槽，不覆盖已编辑内容。",true)
+            L:Text(T["各专精独立保存 6 套方案；编辑选择不影响屏上匹配。旧版恢复仅填入对应的空槽，不覆盖已编辑内容。"],true)
             local rows={}
             m.rotationEditors={}
             for i=1,MAX_SLOTS do
                 local index=i
-                rows[i]={name="方案 "..i,width=100,build=function(_,L)
+                rows[i]={name=T["方案 "]..i,width=100,build=function(_,L)
         local controls={};m.rotationEditors[index]=controls
-        L:Section("方案 "..index)
-        L:Check("在屏幕上显示本方案",function() return EditorRows()[index].enabled end,
+        L:Section(T["方案 "]..index)
+        L:Check(T["在屏幕上显示本方案"],function() return EditorRows()[index].enabled end,
             function(v) EditorRows()[index].enabled=v end,Refresh)
-        L:Text("方案名称",true)
+        L:Text(T["方案名称"],true)
         L:Box(480,28,false,function() return EditorRows()[index].name end,
             function(v) EditorRows()[index].name=v end,Refresh)
-        L:Text("技能顺序（名称 / ID 用空格分隔，可用单体 / AOE 标注分支）",true)
+        L:Text(T["技能顺序（名称 / ID 用空格分隔，可用单体 / AOE 标注分支）"],true)
         controls.sequence=L:Box(560,70,true,function() return EditorRows()[index].sequence end,
             function(v) SetSequence(index,v) end,function() Refresh();L:SyncAll() end)
         local status=L:DynLabel(function() return Status(index) end)
         status:SetHeight(48);L:step(30)
-        L:Text("方案备注（可换行，修改后点击保存）",true)
+        L:Text(T["方案备注（可换行，修改后点击保存）"],true)
         controls.note=L:Box(560,60,true,function() return EditorRows()[index].note or "" end,
             function(v) EditorRows()[index].note=v end,Refresh)
-        controls.showNote=L:Check("在技能循环下方显示备注",function() return EditorRows()[index].showNote==true end,
+        controls.showNote=L:Check(T["在技能循环下方显示备注"],function() return EditorRows()[index].showNote==true end,
             function(v) EditorRows()[index].showNote=v end,Refresh)
         if presets[index] then
-            local restore=L:Button(180,"还原惩戒预设",function()
+            local restore=L:Button(180,T["还原惩戒预设"],function()
                 if editorSpec~=70 then return end
                 EditorRows()[index].sequence=presets[index].sequence
                 EditorRows()[index].name=presets[index].name
@@ -526,18 +531,18 @@ local function BuildOptions(panel,m,L)
             end
             m.rotationRowTabs=Tabs(panel,L,rows,onResize)
         end},
-        {name="写法帮助",width=150,build=function(_,L)
-            L:Section("技能顺序怎么写")
-            L:Text("技能 ID 或名称用空格分隔，也支持换行。中间可用任意独立符号或不写符号；符号前后请留空格，不会作为技能。含空格的技能名称请用 ID。",false)
-            L:Text("名称示例：审判 → 公正之剑 / 复仇之怒 + 灰烬觉醒",true)
-            L:Text("ID 示例：20271 184575 31884 255937（仅空格也可）",true)
-            L:Text("分支示例：375576 > 单体 383328 /AOE 53385；单体、AOE（或群体）标在紧随的技能上方，两个技能同时显示，不会自动选择。",true)
-            L:Text("次数示例：383328 + 53385*1-2；次数紧跟技能。紧凑 > / + 写法仍支持，+ 保留分组，/ 表示并列备选，其他符号显示为 >。",true)
-            L:Section("保存与使用")
-            L:Text("每个方案可单独填写备注，并选择是否显示在循环下方。关闭显示仍保留内容，空备注不占位置；备注不会参与技能解析。",true)
-            L:Text("每套最多 2048 字节，不再限制 24 个图标；全部技能始终一行。编辑后点击保存；技能未识别时显示问号，语法错误时暂时隐藏该条，输入仍会保留。",true)
-            L:Text("惩戒专精前三套内置素材预设；其他专精默认为空，由你配置。所有方案均可编辑和分别显示。关闭卡片只取消该方案的显示勾选，不删除内容。",true)
-            L:Text("未锁定时悬停图标查看技能详情，也可从图标直接拖动整条。锁定后关闭按钮和悬停提示停用，鼠标完全穿透。",true)
+        {name=T["写法帮助"],width=150,build=function(_,L)
+            L:Section(T["技能顺序怎么写"])
+            L:Text(T["技能 ID 或名称用空格分隔，也支持换行。中间可用任意独立符号或不写符号；符号前后请留空格，不会作为技能。含空格的技能名称请用 ID。"],false)
+            L:Text(T["名称示例：审判 → 公正之剑 / 复仇之怒 + 灰烬觉醒"],true)
+            L:Text(T["ID 示例：20271 184575 31884 255937（仅空格也可）"],true)
+            L:Text(T["分支示例：375576 > 单体 383328 /AOE 53385；单体、AOE（或群体）标在紧随的技能上方，两个技能同时显示，不会自动选择。"],true)
+            L:Text(T["次数示例：383328 + 53385*1-2；次数紧跟技能。紧凑 > / + 写法仍支持，+ 保留分组，/ 表示并列备选，其他符号显示为 >。"],true)
+            L:Section(T["保存与使用"])
+            L:Text(T["每个方案可单独填写备注，并选择是否显示在循环下方。关闭显示仍保留内容，空备注不占位置；备注不会参与技能解析。"],true)
+            L:Text(T["每套最多 2048 字节，不再限制 24 个图标；全部技能始终一行。编辑后点击保存；技能未识别时显示问号，语法错误时暂时隐藏该条，输入仍会保留。"],true)
+            L:Text(T["惩戒专精前三套内置素材预设；其他专精默认为空，由你配置。所有方案均可编辑和分别显示。关闭卡片只取消该方案的显示勾选，不删除内容。"],true)
+            L:Text(T["未锁定时悬停图标查看技能详情，也可从图标直接拖动整条。锁定后关闭按钮和悬停提示停用，鼠标完全穿透。"],true)
         end},
     }
     m.rotationTabs=Tabs(panel,L,entries)
@@ -558,7 +563,7 @@ local function setupEvents()
     events:RegisterEvent("DISPLAY_SIZE_CHANGED")
 end
 ns.RotationGuide={Parse=Parse,Resolve=Resolve,Refresh=Refresh,GetDB=DB,Status=Status,UpdateCooldowns=updateCooldowns,Profile=Profile,CurrentSpec=CurrentSpec,EditorRows=EditorRows}
-ns.RegisterModule({id=ID,name="循环提示助手",desc="按职业专精自动匹配的技能顺序与冷却提示；每个专精独立配置。",
+ns.RegisterModule({id=ID,name=T["循环提示助手"],desc=T["按职业专精自动匹配的技能顺序与冷却提示；每个专精独立配置。"],
     defaults=defaults,BuildOptions=BuildOptions,
     OnEnable=function()
         setupEvents()

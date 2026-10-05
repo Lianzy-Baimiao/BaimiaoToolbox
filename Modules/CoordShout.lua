@@ -1,4 +1,5 @@
 local ADDON, ns = ...
+local T = ns.L
 
 --------------------------------------------------------------------------------
 -- 模块：坐标喊话
@@ -12,16 +13,16 @@ local BASE_SPEED = 7  -- 100% 地面速度 = 7 码/秒
 
 local CHANNELS = { "AUTO", "SAY", "PARTY", "RAID", "INSTANCE", "GUILD", "YELL" }
 local CHANNEL_LABEL = {
-    AUTO = "自动（团/队/说）", SAY = "说话", PARTY = "小队", RAID = "团队",
-    INSTANCE = "副本/战场", GUILD = "公会", YELL = "大喊",
+    AUTO = T["自动（团/队/说）"], SAY = T["说话"], PARTY = T["小队"], RAID = T["团队"],
+    INSTANCE = T["副本/战场"], GUILD = T["公会"], YELL = T["大喊"],
 }
 local CHANNEL_TO_API = {
     SAY = "SAY", PARTY = "PARTY", RAID = "RAID",
     INSTANCE = "INSTANCE_CHAT", GUILD = "GUILD", YELL = "YELL",
 }
 
-local DEFAULT_TPL_NOTARGET = "当前{pvp} {waypoint} {area} {coord}"
-local DEFAULT_TPL_TARGET   = "当前{pvp} {waypoint} 目标：{target}{hpbracket} {range} {area} {coord}"
+local DEFAULT_TPL_NOTARGET = T["当前{pvp} {waypoint} {area} {coord}"]
+local DEFAULT_TPL_TARGET   = T["当前{pvp} {waypoint} 目标：{target}{hpbracket} {range} {area} {coord}"]
 
 local defaults = {
     display = {
@@ -152,11 +153,11 @@ local function RangeString(unit)
     if not UnitExists(unit) then return nil end
     local minR, maxR = GetTargetRange(unit)
     if minR and maxR then
-        return string.format("%d-%d码", minR, maxR)
+        return string.format(T["%d-%d码"], minR, maxR)
     elseif maxR then
-        return string.format("<%d码", maxR)
+        return string.format(T["<%d码"], maxR)
     elseif minR and minR > 0 then
-        return string.format(">%d码", minR)
+        return string.format(T[">%d码"], minR)
     end
     return nil
 end
@@ -274,7 +275,7 @@ local function BuildContext()
         ctx.hp, ctx.hpmax, ctx.hppct = hp, hpmax, hppct
         -- {hpbracket}：血量能读到才拼成 [x/y]，读不到（秘密值）自动省略。
         ctx.hpbracket = (hp ~= "" and hpmax ~= "") and ("[" .. hp .. "/" .. hpmax .. "]") or ""
-        ctx.range = RangeString("target") or "0-100码"
+        ctx.range = RangeString("target") or T["0-100码"]
     else
         ctx.target, ctx.hp, ctx.hpmax, ctx.hppct, ctx.hpbracket, ctx.range =
             "", "", "", "", "", ""
@@ -306,7 +307,7 @@ end
 local function Announce()
     -- 战斗中 SendChatMessage 常被系统以“秘密值/受限”为由拒发，提前给出准确提示。
     if InCombatLockdown() then
-        ns.Print("坐标喊话：战斗中无法向聊天频道发送（系统限制），脱战后再试。")
+        ns.Print(T["坐标喊话：战斗中无法向聊天频道发送（系统限制），脱战后再试。"])
         return
     end
     local a = DB().announce
@@ -324,12 +325,12 @@ local function Announce()
     local hasTarget = UnitExists("target")
     local msg = FormatTemplate(hasTarget and a.templateTarget or a.templateNoTarget, ctx)
     if msg == "" then
-        ns.Print("坐标喊话：文本为空，检查一下模板。")
+        ns.Print(T["坐标喊话：文本为空，检查一下模板。"])
         return
     end
     local okSend, err = pcall(SendChatMessage, msg, ResolveChannel())
     if not okSend then
-        ns.Print("坐标喊话：发送失败（" .. tostring(err) .. "），检查一下喊话频道设置。")
+        ns.Print(T["坐标喊话：发送失败（"] .. tostring(err) .. T["），检查一下喊话频道设置。"])
     end
 end
 
@@ -370,22 +371,22 @@ local function UpdateDisplay()
     local lines = {}
     if d.coord then
         local _, x, y = GetPlayerPos()
-        local t = (x and y) and string.format("坐标 %.1f, %.1f", x * 100, y * 100) or "坐标 --"
+        local t = (x and y) and string.format(T["坐标 %.1f, %.1f"], x * 100, y * 100) or T["坐标 --"]
         lines[#lines + 1] = colorize(t, d.coordColor)
     end
     if d.speed then
         local t
-        if pct == nil then t = "移速 --"
-        elseif pct <= 0 then t = "静止"
-        else t = "移速 " .. pct .. "%" end
+        if pct == nil then t = T["移速 --"]
+        elseif pct <= 0 then t = T["静止"]
+        else t = T["移速 "] .. pct .. "%" end
         lines[#lines + 1] = colorize(t, d.speedColor)
     end
     if d.distance then
         -- 没目标时显示完整未知区间 0-100码；有目标时收窄成实测区间。
-        local t = "距离 " .. (UnitExists("target") and (RangeString("target") or "0-100码") or "0-100码")
+        local t = T["距离 "] .. (UnitExists("target") and (RangeString("target") or T["0-100码"]) or T["0-100码"])
         lines[#lines + 1] = colorize(t, d.distColor)
     end
-    if #lines == 0 then lines[1] = "点击通报" end
+    if #lines == 0 then lines[1] = T["点击通报"] end
 
     button.text:SetText(table.concat(lines, "\n"))
     button:SetSize(math.max(button.text:GetStringWidth() + 20, 90),
@@ -405,11 +406,11 @@ local function CreateButton()
         legacy = DB().display,                      -- 旧账号档布局自动迁移
         defaultPos = { point = "CENTER", relPoint = "CENTER", x = 0, y = 0 },
         tooltip = {
-            title = "坐标喊话",
+            title = T["坐标喊话"],
             lines = {
-                "左键：把当前坐标通报到频道",
-                "Alt / Ctrl+左键：拖动摆位（锁定时也可）",
-                "Alt+右键：打开设置（命令 /coord 或 /bm coordshout）",
+                T["左键：把当前坐标通报到频道"],
+                T["Alt / Ctrl+左键：拖动摆位（锁定时也可）"],
+                T["Alt+右键：打开设置（命令 /coord 或 /bm coordshout）"],
             },
         },
     })
@@ -436,7 +437,7 @@ local function CreateButton()
             local ok, err = pcall(UpdateDisplay)
             if not ok and not refreshWarned then
                 refreshWarned = true
-                ns.Print("坐标喊话：刷新出错（已继续运行）：" .. tostring(err))
+                ns.Print(T["坐标喊话：刷新出错（已继续运行）："] .. tostring(err))
             end
         end
     end)
@@ -459,83 +460,83 @@ end
 --------------------------------------------------------------------------------
 
 local function BuildOptions(panel,m,layout)
-    layout:Title("坐标喊话")
-    layout:Text("先选显示内容，再配置喊话模板；变量说明单独查阅。",true)
+    layout:Title(T["坐标喊话"])
+    layout:Text(T["先选显示内容，再配置喊话模板；变量说明单独查阅。"],true)
     m.optionTabs=ns.UI.OptionTabs(panel,layout,{
-        {name="屏幕显示",width=150,build=function(panel,layout)
-    layout:Section("显示")
+        {name=T["屏幕显示"],width=150,build=function(panel,layout)
+    layout:Section(T["显示"])
     layout:Row({
-        function(cell) cell:Check("显示坐标", function() return DB().display.coord end,
+        function(cell) cell:Check(T["显示坐标"], function() return DB().display.coord end,
             function(v) DB().display.coord = v end, Refresh) end,
-        function(cell) cell:Check("显示移速", function() return DB().display.speed end,
+        function(cell) cell:Check(T["显示移速"], function() return DB().display.speed end,
             function(v) DB().display.speed = v end, Refresh) end,
-        function(cell) cell:Check("显示目标距离", function() return DB().display.distance end,
+        function(cell) cell:Check(T["显示目标距离"], function() return DB().display.distance end,
             function(v) DB().display.distance = v end, Refresh) end,
     })
-    layout:Check("锁定位置（Alt+左键可拖动）", function() return L().locked end,
+    layout:Check(T["锁定位置（Alt+左键可拖动）"], function() return L().locked end,
         function(v) L().locked = v end, Refresh)
     layout:Row({
-        function(cell) cell:ColorSwatch("坐标颜色",
+        function(cell) cell:ColorSwatch(T["坐标颜色"],
             function() local c = DB().display.coordColor return c.r, c.g, c.b end,
             function(r, g, b) DB().display.coordColor = { r = r, g = g, b = b } end, Refresh) end,
-        function(cell) cell:ColorSwatch("移速颜色",
+        function(cell) cell:ColorSwatch(T["移速颜色"],
             function() local c = DB().display.speedColor return c.r, c.g, c.b end,
             function(r, g, b) DB().display.speedColor = { r = r, g = g, b = b } end, Refresh) end,
-        function(cell) cell:ColorSwatch("距离颜色",
+        function(cell) cell:ColorSwatch(T["距离颜色"],
             function() local c = DB().display.distColor return c.r, c.g, c.b end,
             function(r, g, b) DB().display.distColor = { r = r, g = g, b = b } end, Refresh) end,
     })
     layout:step(8)
     layout:Row({
-        function(cell) cell:Slider("BaimiaoCoordShoutFontSlider", "字号", 10, 40, 1,
+        function(cell) cell:Slider("BaimiaoCoordShoutFontSlider", T["字号"], 10, 40, 1,
             function() return DB().display.fontSize or 16 end,
             function(v) DB().display.fontSize = v end, Refresh) end,
-        function(cell) cell:Slider("BaimiaoCoordShoutScaleSlider", "整体缩放（%）", 50, 200, 5,
+        function(cell) cell:Slider("BaimiaoCoordShoutScaleSlider", T["整体缩放（%）"], 50, 200, 5,
             function() return (DB().display.scale or 1)*100 end,
             function(v) DB().display.scale = v/100 end, Refresh) end,
     }, 260)
 
 
         end},
-        {name="通报模板",width=150,build=function(panel,layout)
-    layout:Section("通报")
-    layout:Check("通报前在脚下落地图路点（{waypoint} 才有链接）",
+        {name=T["通报模板"],width=150,build=function(panel,layout)
+    layout:Section(T["通报"])
+    layout:Check(T["通报前在脚下落地图路点（{waypoint} 才有链接）"],
         function() return DB().announce.setWaypoint end,
         function(v) DB().announce.setWaypoint = v end)
-    layout:Dropdown(240, "喊话频道：", ns.UI.ListFrom(CHANNELS, CHANNEL_LABEL),
+    layout:Dropdown(240, T["喊话频道："], ns.UI.ListFrom(CHANNELS, CHANNEL_LABEL),
         function() return DB().announce.channel or "AUTO" end,
         function(v) DB().announce.channel = v end)
 
-    layout:Text("血量倍数（{hppct} 用；100 = 真实百分比）:", false)
+    layout:Text(T["血量倍数（{hppct} 用；100 = 真实百分比）:"], false)
     layout:Box(80, 22, false,
         function() return tostring(DB().announce.hpMultiplier or 100) end,
         function(v) local n = tonumber(v); DB().announce.hpMultiplier = (n and n > 0) and n or 100 end)
 
-    layout:Text("无目标喊话模板:", false)
+    layout:Text(T["无目标喊话模板:"], false)
     layout:Box(460, 56, true,
         function() return DB().announce.templateNoTarget end,
         function(v) DB().announce.templateNoTarget = v end)
 
-    layout:Text("有目标喊话模板:", false)
+    layout:Text(T["有目标喊话模板:"], false)
     layout:Box(460, 56, true,
         function() return DB().announce.templateTarget end,
         function(v) DB().announce.templateTarget = v end)
 
-    layout:Text("注意：下方发送按钮会向所选频道真实发送消息，并非仅本地预览。",true)
-    local resetBtn = layout:Button(140, "恢复默认模板", function()
+    layout:Text(T["注意：下方发送按钮会向所选频道真实发送消息，并非仅本地预览。"],true)
+    local resetBtn = layout:Button(140, T["恢复默认模板"], function()
         DB().announce.templateNoTarget = DEFAULT_TPL_NOTARGET
         DB().announce.templateTarget = DEFAULT_TPL_TARGET
         layout:SyncAll()
-        ns.Print("坐标喊话：已恢复默认模板。")
+        ns.Print(T["坐标喊话：已恢复默认模板。"])
     end)
-    layout:Button(200, "发送一次（真实喊话）", function() Announce() end, true, resetBtn)
+    layout:Button(200, T["发送一次（真实喊话）"], function() Announce() end, true, resetBtn)
         end},
-        {name="变量帮助",width=150,build=function(panel,layout)
+        {name=T["变量帮助"],width=150,build=function(panel,layout)
     local help =
-        "变量：{pvp} 战争模式   {waypoint} 路点链接   {map} 地图   {zone} 小地区   {area} 地图+小地区\n" ..
-        "{coord} x/y   {x} {y} 单独坐标   {target} 目标名   {range} 距离区间\n" ..
-        "{hp} {hpmax} 血量   {hpbracket} [血量/上限]   {hppct} 百分比（敌对目标为“秘密值”，读不到会自动省略）\n" ..
-        "{speed} 移速百分比   {speedyd} 码/秒。空变量自动省略、空格自动压缩。"
+        T["变量：{pvp} 战争模式   {waypoint} 路点链接   {map} 地图   {zone} 小地区   {area} 地图+小地区\n"] ..
+        T["{coord} x/y   {x} {y} 单独坐标   {target} 目标名   {range} 距离区间\n"] ..
+        T["{hp} {hpmax} 血量   {hpbracket} [血量/上限]   {hppct} 百分比（敌对目标为“秘密值”，读不到会自动省略）\n"] ..
+        T["{speed} 移速百分比   {speedyd} 码/秒。空变量自动省略、空格自动压缩。"]
     -- 给每个 {变量} 染成主题翠绿，说明文字保持浅灰，读起来有层次。
     help = help:gsub("(%b{})", "|cff0cd29f%1|r")
     layout:Text(help, true)
@@ -558,16 +559,16 @@ local function SetupSlash()
         if cmd == "say" or cmd == "send" or cmd == "go" then
             Announce()
         elseif cmd == "lock" then
-            L().locked = true; Refresh(); ns.Print("坐标喊话：已锁定位置（背景已隐藏）。")
+            L().locked = true; Refresh(); ns.Print(T["坐标喊话：已锁定位置（背景已隐藏）。"])
         elseif cmd == "unlock" then
-            L().locked = false; Refresh(); ns.Print("坐标喊话：已解锁，可拖动。")
+            L().locked = false; Refresh(); ns.Print(T["坐标喊话：已解锁，可拖动。"])
         elseif cmd == "reset" then
             local d = L()
             d.point, d.relPoint, d.x, d.y = "CENTER", "CENTER", 0, 0
-            Refresh(); ns.Print("坐标喊话：已移回屏幕中心。")
+            Refresh(); ns.Print(T["坐标喊话：已移回屏幕中心。"])
         elseif cmd == "toggle" then
             DB().display.enabled = not DB().display.enabled
-            Refresh(); ns.Print("坐标喊话显示：" .. (DB().display.enabled and "开" or "关"))
+            Refresh(); ns.Print(T["坐标喊话显示："] .. (DB().display.enabled and T["开"] or T["关"]))
         else
             ns.OpenOptions(MODULE_ID)
         end
@@ -580,8 +581,8 @@ end
 
 ns.RegisterModule({
     id = MODULE_ID,
-    name = "坐标喊话",
-    desc = "屏上显示坐标/移速/到目标的距离区间，点击按模板把坐标通报到频道。",
+    name = T["坐标喊话"],
+    desc = T["屏上显示坐标/移速/到目标的距离区间，点击按模板把坐标通报到频道。"],
     defaults = defaults,
     OnEnable = function()
         -- 上次已在当前客户端版本被系统封过测距：直接跳过探测，本次登录不再产生拦截记录。

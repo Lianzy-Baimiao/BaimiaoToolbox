@@ -2,6 +2,7 @@
 -- Does not replace Blizzard methods, touch other addons' saved settings, or cast
 -- from Lua. Teleports use hardware-click secure buttons, prepared out of combat.
 local ADDON, ns = ...
+local T = ns.L
 local ID, D, UI = "mythicplus", ns.MythicPlusData, ns.UI
 local WHITE="Interface\\Buttons\\WHITE8x8"
 local defaults={show=true,showWeekly=true,showBest=true,showScore=true,teleport=true,
@@ -31,7 +32,7 @@ local function text(parent,value,size,role)
     local fs=parent:CreateFontString(nil,"OVERLAY","GameFontHighlight")
     UI.SetRuntimeFont(fs,STANDARD_TEXT_FONT or GameFontNormal:GetFont(),size or 13)
     fs:SetJustifyH("LEFT");fs:SetWordWrap(false);fs:SetText(value)
-    paint(function() fs:SetTextColor(unpack(UI.palette[role or "text"])) end)
+    UI.StyleText(fs,role or "text")
     return fs
 end
 local function surface(parent,role,borderless)
@@ -68,19 +69,19 @@ local function button(parent,value,width,fn)
     b:SetScript("OnClick",fn);return b
 end
 local function openVault()
-    if InCombatLockdown() then ns.Print("请脱离战斗后查看宏伟宝库。");return end
+    if InCombatLockdown() then ns.Print(T["请脱离战斗后查看宏伟宝库。"]);return end
     if C_AddOns and C_AddOns.LoadAddOn then C_AddOns.LoadAddOn("Blizzard_WeeklyRewards") end
-    if WeeklyRewardsFrame then ShowUIPanel(WeeklyRewardsFrame) else ns.Print("宏伟宝库界面暂不可用。") end
+    if WeeklyRewardsFrame then ShowUIPanel(WeeklyRewardsFrame) else ns.Print(T["宏伟宝库界面暂不可用。"]) end
 end
 local function openTab()
-    if InCombatLockdown() then ns.Print("请脱离战斗后打开大秘境页签。");return end
+    if InCombatLockdown() then ns.Print(T["请脱离战斗后打开大秘境页签。"]);return end
     if PVEFrame_ShowFrame then
         PVEFrame_ShowFrame("ChallengesFrame")
         if PVEFrame then ShowUIPanel(PVEFrame) end
     elseif PVEFrame_ToggleFrame then PVEFrame_ToggleFrame("ChallengesFrame") end
 end
 local function Duration(seconds)
-    if not seconds or seconds<=0 then return "用时未知" end
+    if not seconds or seconds<=0 then return T["用时未知"] end
     return string.format("%d:%02d",math.floor(seconds/60),math.floor(seconds%60))
 end
 local function tint(display,r,g,b)
@@ -95,10 +96,10 @@ end
 local function Score(value,kind)
     return value and colored(kind or "mapScore",value,tostring(math.floor(value+.5))) or "—"
 end
-local function Points(value) return value and (Score(value).."分") or "—" end
+local function Points(value) return value and (Score(value)..T["分"]) or "—" end
 local function Timed(run)
-    if run.timed==nil then return "时间未知" end
-    return run.timed and "限时" or "超时"
+    if run.timed==nil then return T["时间未知"] end
+    return run.timed and T["限时"] or T["超时"]
 end
 local function TimePair(run)
     local elapsed=run.duration and run.duration>0 and Duration(run.duration) or "—"
@@ -106,12 +107,12 @@ local function TimePair(run)
     return "("..elapsed.."/"..limit..")"
 end
 local function AddMembers(lines,members)
-    if not members or #members==0 then lines[#lines+1]="暂无队伍名单";return end
+    if not members or #members==0 then lines[#lines+1]=T["暂无队伍名单"];return end
     for _,member in ipairs(members) do
         local class,classFile
         if member.classID then class,classFile=D.Call(_G,"GetClassInfo",member.classID) end
         local _,spec=D.Call(_G,"GetSpecializationInfoByID",member.specID)
-        local name=member.name and member.name~="" and member.name or "姓名未提供"
+        local name=member.name and member.name~="" and member.name or T["姓名未提供"]
         -- Name and specialization have fixed columns, rather than free-form prose.
         lines[#lines+1]={tint(name,D.ClassColor(classFile)),
             (spec or "")..(class and ((spec and " " or "")..class) or "")}
@@ -121,9 +122,9 @@ local function AddBest(lines,best,limit)
     local timed=best.timed
     if timed==nil then timed=D.Timed(best.duration,limit) end
     local count,named=D.MemberCounts(best.members)
-    local suffix=count==1 and "（仅1人资料）" or (named<count and "（姓名不全）" or "")
-    lines[#lines+1]={tint(best.source.."队伍"..suffix,unpack(UI.palette.accent)),Level(best.level,timed).." · "..Points(best.score)}
-    lines[#lines+1]="用时 / 限时  "..TimePair({duration=best.duration,limit=limit})
+    local suffix=count==1 and T["（仅1人资料）"] or (named<count and T["（姓名不全）"] or "")
+    lines[#lines+1]={tint(T[best.source]..T["队伍"]..suffix,unpack(UI.palette.accent)),Level(best.level,timed).." · "..Points(best.score)}
+    lines[#lines+1]=T["用时 / 限时  "]..TimePair({duration=best.duration,limit=limit})
     AddMembers(lines,best.members)
 end
 local function MapLines(map,weekly)
@@ -132,18 +133,18 @@ local function MapLines(map,weekly)
     local best=D.BestDetails(map.id,weekly)
     if best then AddBest(lines,best,map.limit)
     else
-        lines[#lines+1]=not map.ratingReady and "赛季成绩待同步"
-            or (map.best>0 and ("赛季 "..Level(map.best,map.bestTimed).." · "..Points(map.score)) or "赛季未完成")
-        lines[#lines+1]="暂无最佳队伍信息"
+        lines[#lines+1]=not map.ratingReady and T["赛季成绩待同步"]
+            or (map.best>0 and (T["赛季 "]..Level(map.best,map.bestTimed).." · "..Points(map.score)) or T["赛季未完成"])
+        lines[#lines+1]=T["暂无最佳队伍信息"]
     end
     return lines
 end
 local function RunTooltip(owner,run)
-    local lines={{"本次 "..Level(run.level,run.timed).." "..TimePair(run).." "..Timed(run),Points(run.score)}}
+    local lines={{T["本次 "]..Level(run.level,run.timed).." "..TimePair(run).." "..Timed(run),Points(run.score)}}
     lastTeamMapID,lastTeamWeekly=run.id,true
     local best=D.BestDetails(run.id,true)
     if best then lines[#lines+1]=" ";AddBest(lines,best,run.limit)
-    else lines[#lines+1]="暂无最佳队伍信息" end
+    else lines[#lines+1]=T["暂无最佳队伍信息"] end
     tip(owner,run.name,lines)
 end
 local function sortedMaps()
@@ -161,8 +162,8 @@ end
 local function PortalTooltip(tile,owner)
     if not tile.map then return end
     local _,state=D.Portal(tile.map.id)
-    if state=="点击传送" and owner~=tile.portal then state="传送已就绪" end
-    tip(owner,tile.map.name,{DB().teleport and state or "传送已关闭"})
+    if state==T["点击传送"] and owner~=tile.portal then state=T["传送已就绪"] end
+    tip(owner,tile.map.name,{DB().teleport and state or T["传送已关闭"]})
 end
 local function makeTile(index)
     local f=surface(canvas);f:EnableMouse(true)
@@ -188,7 +189,7 @@ local function makeTile(index)
     local b=CreateFrame("Button","BaimiaoMythicPortal"..index,UIParent,"SecureActionButtonTemplate,BackdropTemplate")
     b:Hide();b:EnableMouse(true);b:RegisterForClicks("AnyUp","AnyDown")
     b:SetBackdrop({bgFile=WHITE,edgeFile=WHITE,edgeSize=1})
-    b.caption=text(b,"传送",11,"accent");b.caption:SetPoint("CENTER")
+    b.caption=text(b,T["传送"],11,"accent");b.caption:SetPoint("CENTER")
     local highlight=b:CreateTexture(nil,"HIGHLIGHT");highlight:SetAllPoints();highlight:SetColorTexture(1,1,1,.08)
     paint(function() b:SetBackdropColor(unpack(UI.palette.hover));b:SetBackdropBorderColor(unpack(UI.palette.accent)) end)
     b:SetScript("OnEnter",function(self) PortalTooltip(f,self) end);b:SetScript("OnLeave",leave)
@@ -200,9 +201,9 @@ local function syncPortal(tile)
     if InCombatLockdown() then pending=true;return end
     local id,state
     if tile.map then id,state=D.Portal(tile.map.id) end
-    local usable=active and tile:IsShown() and DB().teleport and id and state=="点击传送"
+    local usable=active and tile:IsShown() and DB().teleport and id and state==T["点击传送"]
     if GameTooltip and (GameTooltip:IsOwned(b) or GameTooltip:IsOwned(tile.portalStatus)) then leave() end
-    tile.state:SetText(usable and "" or (DB().teleport and (state=="冷却状态暂不可用" and "状态未知" or state or "未收录传送") or "传送已关闭"))
+    tile.state:SetText(usable and "" or (DB().teleport and (state==T["冷却状态暂不可用"] and T["状态未知"] or state or T["未收录传送"]) or T["传送已关闭"]))
     tile.portalStatus:SetShown(not usable)
     if not usable then
         if b.driver and UnregisterStateDriver then UnregisterStateDriver(b,"visibility");b.driver=nil end
@@ -212,7 +213,7 @@ local function syncPortal(tile)
     b:SetScale(scale);b:SetSize(84,20);b:ClearAllPoints();b:SetPoint("BOTTOMRIGHT",tile,"BOTTOMRIGHT",-8,4)
     b:SetFrameStrata(host:GetFrameStrata());b:SetFrameLevel(host:GetFrameLevel()+30)
     b:SetAttribute("type1","spell");b:SetAttribute("spell",id)
-    b.caption:SetText("点击传送")
+    b.caption:SetText(T["点击传送"])
     if RegisterStateDriver and not b.driver then RegisterStateDriver(b,"visibility","[combat] hide; show");b.driver=true end
     b:Show()
 end
@@ -248,7 +249,7 @@ end
 -- Fit complete level tokens, reserving room for an ellipsis while more remain.
 -- Measure the actual font, not byte lengths (names, colors and outlines vary).
 local function SummaryLevels(font,runs)
-    local prefix=#runs.."次  "
+    local prefix=#runs..T["次  "]
     local parts,shown={},0
     for i,run in ipairs(runs) do
         parts[i]=Level(run.level,run.timed)
@@ -260,10 +261,10 @@ local function SummaryLevels(font,runs)
 end
 local function SummaryTooltip(owner,map,runs)
     local lines={}
-    if not snapshot.historyReady then lines[1]="本周记录待同步"
-    elseif #runs==0 then lines[1]="本周尚未完成"
+    if not snapshot.historyReady then lines[1]=T["本周记录待同步"]
+    elseif #runs==0 then lines[1]=T["本周尚未完成"]
     else
-        lines[1]="本周完成 "..#runs.." 次"
+        lines[1]=T["本周完成 "]..#runs..T[" 次"]
         for i,run in ipairs(runs) do
             lines[#lines+1]={i..". "..Level(run.level,run.timed).." "..TimePair(run),Timed(run)}
         end
@@ -284,35 +285,34 @@ local function RenderRows()
         f:SetShown(item~=nil)
         if item then
             f.left:SetText(summary and item.name or (Level(item.level,item.timed).."  "..item.name))
-            f.left:SetTextColor(unpack(UI.palette[summary and "accent" or "text"]))
+            UI.StyleText(f.left,summary and "accent" or "text")
             f.time:SetText(summary and "" or TimePair(item))
             f.time:SetShown(not summary)
             f.left:SetWidth(summary and 142 or 150)
             f.right:ClearAllPoints();f.right:SetPoint("TOPLEFT",summary and 154 or 276,-6);f.right:SetWidth(summary and 150 or 28)
             if summary then
-                if not snapshot.historyReady then f.right:SetText("待同步")
-                elseif #entry.runs==0 then f.right:SetText("未完成")
+                if not snapshot.historyReady then f.right:SetText(T["待同步"])
+                elseif #entry.runs==0 then f.right:SetText(T["未完成"])
                 else SummaryLevels(f.right,entry.runs) end
-            else f.right:SetText(item.timed==nil and "未知" or Timed(item)) end
-            f.right:SetTextColor(unpack(UI.palette[(not summary and item.timed==true) and "accent" or "muted"]))
-            if not summary and item.timed==false then f.right:SetTextColor(1,.45,.35) end
+            else f.right:SetText(item.timed==nil and T["未知"] or Timed(item)) end
+            UI.StyleText(f.right,not summary and (item.timed==true and "accent" or item.timed==false and "danger") or "muted")
         end
     end
-    canvas.empty:SetText(summary and (#list==0 and "等待游戏同步赛季地下城…" or "")
-        or (snapshot.historyReady and (#list==0 and "本周还没有大秘境记录" or "") or "等待游戏同步本周记录…"))
-    canvas.range:SetText(#list==0 and "" or string.format("%d–%d / %d",rowOffset+1,math.min(#list,rowOffset+visible),#list)..(#list>visible and "  ·  滚轮查看更多" or ""))
-    canvas.runTab.caption:SetText("本周记录  "..#snapshot.runs)
-    canvas.mapTab.caption:SetText("副本汇总  "..#snapshot.maps)
+    canvas.empty:SetText(summary and (#list==0 and T["等待游戏同步赛季地下城…"] or "")
+        or (snapshot.historyReady and (#list==0 and T["本周还没有大秘境记录"] or "") or T["等待游戏同步本周记录…"]))
+    canvas.range:SetText(#list==0 and "" or string.format("%d–%d / %d",rowOffset+1,math.min(#list,rowOffset+visible),#list)..(#list>visible and T["  ·  滚轮查看更多"] or ""))
+    canvas.runTab.caption:SetText(T["本周记录  "]..#snapshot.runs)
+    canvas.mapTab.caption:SetText(T["副本汇总  "]..#snapshot.maps)
     canvas.runTab:UpdateSelection();canvas.mapTab:UpdateSelection()
 end
 -- Compact teammate rows only. Keep full names in tooltips, dungeon cards and
 -- the data/sync layer; unfamiliar dungeons continue to use their native name.
 local partyDungeonNames={
-    ["纳洛拉克的洞穴"]="洞穴",
-    ["虚空之痕竞技场"]="竞技场",
-    ["虚空之痕"]="竞技场",
-    ["塞塔里斯神庙"]="神庙",
-    ["红玉新生法池"]="红玉",
+    [T["纳洛拉克的洞穴"]]=T["洞穴"],
+    [T["虚空之痕竞技场"]]=T["竞技场"],
+    [T["虚空之痕"]]=T["竞技场"],
+    [T["塞塔里斯神庙"]]=T["神庙"],
+    [T["红玉新生法池"]]=T["红玉"],
 }
 local function RenderParty()
     local members=ns.PartyKeystones and ns.PartyKeystones.Snapshot() or {}
@@ -338,11 +338,11 @@ local function build()
     host:SetFrameStrata("HIGH")
     host:SetFrameLevel(ChallengesFrame:GetFrameLevel()+200)
     canvas=surface(host,"bg");host.canvas=canvas;canvas.tiles=tiles;canvas.rows=rows;canvas.vaults=vaults;canvas:SetSize(W,H);canvas:SetPoint("TOPLEFT",host,"TOPLEFT",2,-2)
-    canvas.title=label(canvas,"赛季地下城",19,12,10,300)
+    canvas.title=label(canvas,T["赛季地下城"],19,12,10,300)
     canvas.key=label(canvas,"",18,12,36,450,"accent")
     canvas.score=label(canvas,"",12,12,62,370,"muted")
-    canvas.settings=button(canvas,"设置",66,function()ns.OpenOptions(ID)end)
-    canvas.refresh=button(canvas,"刷新",66,function()RequestData();Queue()end)
+    canvas.settings=button(canvas,T["设置"],66,function()ns.OpenOptions(ID)end)
+    canvas.refresh=button(canvas,T["刷新"],66,function()RequestData();Queue()end)
     canvas.partyRows=partyRows
     for i=1,4 do
         local f=CreateFrame("Frame",nil,canvas);f:SetSize(PARTY_ROW_WIDTH,12);f:EnableMouse(true)
@@ -352,27 +352,27 @@ local function build()
         f:SetScript("OnEnter",function(self)
             local e=self.entry;if not e then return end
             local lines={e.status or (Level(e.level).."  "..D.Map(e.mapID).name)}
-            if e.source then lines[#lines+1]=e.source
-            elseif e.status=="待同步" then lines[#lines+1]="等待兼容插件同步，或队友在小队频道分享钥石链接。"end
+            if e.source then lines[#lines+1]=T[e.source]
+            elseif e.status==T["待同步"] then lines[#lines+1]=T["等待兼容插件同步，或队友在小队频道分享钥石链接。"]end
             tip(self,e.name,lines)
         end);f:SetScript("OnLeave",leave);partyRows[i]=f
     end
-    canvas.affixTitle=label(canvas,"本周词缀",11,12,93,68,"muted")
+    canvas.affixTitle=label(canvas,T["本周词缀"],11,12,93,68,"muted")
     for i=1,8 do
         local f=CreateFrame("Button",nil,canvas);f:SetSize(26,26);f:SetPoint("TOPLEFT",84+(i-1)*32,-85)
         f.icon=f:CreateTexture(nil,"ARTWORK");f.icon:SetAllPoints();f.icon:SetTexCoord(.08,.92,.08,.92)
         f:SetScript("OnEnter",function(self) if self.info then tip(self,self.info.name,{self.info.description or ""}) end end)
         f:SetScript("OnLeave",leave);affixes[i]=f
     end
-    canvas.affixEmpty=label(canvas,"等待词缀数据…",11,84,93,280,"muted")
-    canvas.mapsTitle=label(canvas,"副本概览 · 赛季 / 本周",11,12,121,330,"muted")
+    canvas.affixEmpty=label(canvas,T["等待词缀数据…"],11,84,93,280,"muted")
+    canvas.mapsTitle=label(canvas,T["副本概览 · 赛季 / 本周"],11,12,121,330,"muted")
     canvas.prev=button(canvas,"‹",26,function()page=math.max(1,page-1);Render()end)
     canvas.next=button(canvas,"›",26,function()page=page+1;Render()end)
     for i=1,8 do makeTile(i) end
-    canvas.noMaps=label(canvas,"赛季地下城数据暂不可用",13,24,172,400,"muted")
+    canvas.noMaps=label(canvas,T["赛季地下城数据暂不可用"],13,24,172,400,"muted")
     canvas.weekly=surface(canvas);place(canvas.weekly,480,8,328,CONTENT_BOTTOM-8)
-    canvas.weekTitle=label(canvas.weekly,"本周大秘境",18,10,10,200)
-    canvas.vaultButton=button(canvas.weekly,"宝库",60,openVault);canvas.vaultButton:SetPoint("TOPRIGHT",-10,-8)
+    canvas.weekTitle=label(canvas.weekly,T["本周大秘境"],18,10,10,200)
+    canvas.vaultButton=button(canvas.weekly,T["宝库"],60,openVault);canvas.vaultButton:SetPoint("TOPRIGHT",-10,-8)
     canvas.weekStats=label(canvas.weekly,"",11,10,37,308,"muted")
     for i=1,3 do
         local f=surface(canvas.weekly,"bg");f:SetPoint("TOPLEFT",10+(i-1)*104,-58);f:SetSize(100,52)
@@ -380,7 +380,7 @@ local function build()
         f.detail=label(f,"",10,7,37,86,"muted")
         f:EnableMouse(true)
         f:SetScript("OnEnter",function(self)
-            tip(self,"地下城宝库进度",{"含符合条件的英雄 / 史诗地下城。", "奖励详情见右上角「宝库」。"})
+            tip(self,T["地下城宝库进度"],{T["含符合条件的英雄 / 史诗地下城。"], T["奖励详情见右上角「宝库」。"]})
         end);f:SetScript("OnLeave",leave);vaults[i]=f
     end
     canvas.selector=surface(canvas.weekly,"bg");canvas.selector:SetPoint("TOPLEFT",10,-116);canvas.selector:SetSize(308,26)
@@ -393,7 +393,7 @@ local function build()
         function b:UpdateSelection()
             self.selected=mode==value
             self:SetBackdropColor(unpack(UI.palette[self.selected and "hover" or (self.hovered and "card" or "bg")]))
-            self.caption:SetTextColor(unpack(UI.palette[self.selected and "accent" or "muted"]))
+            UI.StyleText(self.caption,self.selected and "accent" or "muted")
             self.indicator:SetColorTexture(unpack(UI.palette.accent));self.indicator:SetShown(self.selected)
         end
         b:SetScript("OnEnter",function(self)self.hovered=true;self:UpdateSelection()end)
@@ -435,7 +435,7 @@ Render=function()
     for i,f in ipairs(partyRows)do place(f,partyLeft,36+(i-1)*12,PARTY_ROW_WIDTH,12)end
     local hasParty=ns.PartyKeystones and #ns.PartyKeystones.Snapshot()>0
     canvas.score:SetWidth(hasParty and partyLeft-22 or leftWidth-82)
-    canvas.key:SetText(snapshot.keyName and ("当前钥石  "..Level(snapshot.keyLevel).."  "..snapshot.keyName) or "当前未持有钥石")
+    canvas.key:SetText(snapshot.keyName and (T["当前钥石  "]..Level(snapshot.keyLevel).."  "..snapshot.keyName) or T["当前未持有钥石"])
     local keyWidth=hasParty and partyLeft-22 or leftWidth-4
     local keyFont=STANDARD_TEXT_FONT or GameFontNormal:GetFont()
     UI.SetRuntimeFont(canvas.key,keyFont,18);canvas.key:SetWidth(0)
@@ -445,7 +445,7 @@ Render=function()
     end
     canvas.key:SetWidth(keyWidth)
     RenderParty()
-    canvas.score:SetText("赛季评分  "..Score(snapshot.rating,"rating"))
+    canvas.score:SetText(T["赛季评分  "]..Score(snapshot.rating,"rating"))
     for i,f in ipairs(affixes) do
         f.info=snapshot.affixes[i];f:SetShown(f.info~=nil)
         if f.info then f.icon:SetTexture(f.info.texture) end
@@ -454,29 +454,29 @@ Render=function()
     local list=sortedMaps();local pages=math.max(1,math.ceil(#list/8));page=math.max(1,math.min(page,pages))
     place(canvas.prev,leftWidth-44,116,24,20);place(canvas.next,leftWidth-12,116,24,20)
     canvas.prev:SetShown(pages>1);canvas.next:SetShown(pages>1)
-    canvas.mapsTitle:SetText("副本概览 · 赛季 / 本周"..(pages>1 and ("  "..page.."/"..pages) or ""))
+    canvas.mapsTitle:SetText(T["副本概览 · 赛季 / 本周"]..(pages>1 and ("  "..page.."/"..pages) or ""))
     local width=(leftWidth-8)/2
     for i,tile in ipairs(tiles) do
         local map=list[(page-1)*8+i];tile.map=map;tile:SetShown(map~=nil)
         if map then
             place(tile,12+((i-1)%2)*(width+8),TILE_TOP+math.floor((i-1)/2)*TILE_PITCH,width,TILE_HEIGHT)
             tile.icon:SetTexture(map.texture or 134400);tile.name:SetText(map.name);tile.name:SetWidth(width-54)
-            local best=db.showBest and (not map.ratingReady and "赛季 —" or (map.best>0 and ("赛季 "..Level(map.best,map.bestTimed)) or "赛季未完成")) or ""
-            local score=db.showScore and ("评分 "..(map.ratingReady and Score(map.score) or "—")) or ""
+            local best=db.showBest and (not map.ratingReady and T["赛季 —"] or (map.best>0 and (T["赛季 "]..Level(map.best,map.bestTimed)) or T["赛季未完成"])) or ""
+            local score=db.showScore and (T["评分 "]..(map.ratingReady and Score(map.score) or "—")) or ""
             tile.stats:SetText(best..(best~="" and score~="" and " · " or "")..score);tile.stats:SetWidth(width-54)
-            tile.week:SetText(snapshot.historyReady and ("本周 "..map.count.." 次"..(map.weekly>0 and (" · "..Level(map.weekly,map.weeklyRun and map.weeklyRun.timed)) or "")) or "本周待同步")
+            tile.week:SetText(snapshot.historyReady and (T["本周 "]..map.count..T[" 次"]..(map.weekly>0 and (" · "..Level(map.weekly,map.weeklyRun and map.weeklyRun.timed)) or "")) or T["本周待同步"])
         end
         syncPortal(tile)
     end
     canvas.noMaps:SetShown(#list==0)
     local timed=0;for _,run in ipairs(snapshot.runs) do if run.timed then timed=timed+1 end end
-    canvas.weekStats:SetText(snapshot.historyReady and string.format("完成 %d 次  ·  限时 %d 次  ·  最高 %s",#snapshot.runs,timed,snapshot.weeklyBest and Level(snapshot.weeklyBest.level,snapshot.weeklyBest.timed) or "—") or "正在同步本周记录…")
+    canvas.weekStats:SetText(snapshot.historyReady and string.format(T["完成 %d 次  ·  限时 %d 次  ·  最高 %s"],#snapshot.runs,timed,snapshot.weeklyBest and Level(snapshot.weeklyBest.level,snapshot.weeklyBest.timed) or "—") or T["正在同步本周记录…"])
     for i,f in ipairs(vaults) do
         local a=snapshot.vault[i]
-        f.title:SetText(a and (a.threshold.." 次奖励") or ("宝库槽位 "..i))
+        f.title:SetText(a and (a.threshold..T[" 次奖励"]) or (T["宝库槽位 "]..i))
         f.value:SetText(a and (math.min(a.progress,a.threshold).." / "..a.threshold) or "—")
-        f.value:SetTextColor(unpack(UI.palette[a and a.progress>=a.threshold and "accent" or "muted"]))
-        f.detail:SetText(a and (a.progress>=a.threshold and "已解锁" or "尚未解锁") or "等待游戏数据")
+        UI.StyleText(f.value,a and a.progress>=a.threshold and "accent" or "muted")
+        f.detail:SetText(a and (a.progress>=a.threshold and T["已解锁"] or T["尚未解锁"]) or T["等待游戏数据"])
     end
     RenderRows()
 end
@@ -563,13 +563,13 @@ RequestData=function()
     D.Call(C_MythicPlus,"RequestMapInfo");D.Call(C_MythicPlus,"RequestCurrentAffixes");D.Call(C_MythicPlus,"RequestRewards")
 end
 local function ReportTeam()
-    if not lastTeamMapID then ns.Print("请先把鼠标移到要检查的副本卡片或本周记录，再输入 /bmmp team。");return end
+    if not lastTeamMapID then ns.Print(T["请先把鼠标移到要检查的副本卡片或本周记录，再输入 /bmmp team。"]);return end
     local best,candidates=D.BestDetails(lastTeamMapID,lastTeamWeekly)
-    ns.Print("队伍诊断："..D.Map(lastTeamMapID).name.."（"..lastTeamMapID.."）；"..
-        (lastTeamWeekly and "本周看板" or "副本卡片").."采用："..(best and best.source or "暂无最佳成绩").."。")
+    ns.Print(T["队伍诊断："]..D.Map(lastTeamMapID).name.."（"..lastTeamMapID.."）；"..
+        (lastTeamWeekly and T["本周看板"] or T["副本卡片"])..T["采用："]..(best and T[best.source] or T["暂无最佳成绩"]).."。")
     for _,entry in ipairs(candidates) do
         local count,named=D.MemberCounts(entry.members)
-        ns.Print(entry.source.." +"..entry.level.."：名单 "..count.." 人 / 有姓名 "..named.." 人。")
+        ns.Print(T[entry.source].." +"..entry.level..T["：名单 "]..count..T[" 人 / 有姓名 "]..named..T[" 人。"])
     end
 end
 local registered=false
@@ -599,7 +599,7 @@ events:SetScript("OnEvent",function(_,event,name)
             for _,tile in ipairs(tiles) do if tile.map then
                 if GameTooltip and (GameTooltip:IsOwned(tile.portal) or GameTooltip:IsOwned(tile.portalStatus)) then leave() end
                 local _,state=D.Portal(tile.map.id)
-                tile.state:SetText(DB().teleport and state or "传送已关闭");tile.portalStatus:Show()
+                tile.state:SetText(DB().teleport and state or T["传送已关闭"]);tile.portalStatus:Show()
             end end
         end
     elseif event=="PLAYER_REGEN_ENABLED" then
@@ -614,34 +614,34 @@ events:SetScript("OnEvent",function(_,event,name)
     end
 end)
 local function BuildOptions(panel,m,L)
-    L:Title("大秘境信息优化")
+    L:Title(T["大秘境信息优化"])
     m.mythicTabs=UI.OptionTabs(panel,L,{
-        {name="显示与布局",width=150,build=function(_,L)
-            L:Section("开始使用")
-            L:Check("启用大秘境信息优化",function()return DB().show end,function(v)DB().show=v end,Refresh)
-            L:Button(200,"打开史诗钥石地下城",openTab)
-            L:Section("看板布局")
-            L:Check("显示右侧本周看板",function()return DB().showWeekly end,function(v)DB().showWeekly=v end,Refresh)
-            L:Slider("BaimiaoMythicScale","窗口缩放（%）",70,130,5,function()return DB().scalePercent end,function(v)DB().scalePercent=v end,Refresh)
-            L:Dropdown(260,"副本排序：",{{text="赛季评分",value="score"},{text="本周最高层数",value="weekly"},{text="副本名称",value="name"}},
+        {name=T["显示与布局"],width=150,build=function(_,L)
+            L:Section(T["开始使用"])
+            L:Check(T["启用大秘境信息优化"],function()return DB().show end,function(v)DB().show=v end,Refresh)
+            L:Button(200,T["打开史诗钥石地下城"],openTab)
+            L:Section(T["看板布局"])
+            L:Check(T["显示右侧本周看板"],function()return DB().showWeekly end,function(v)DB().showWeekly=v end,Refresh)
+            L:Slider("BaimiaoMythicScale",T["窗口缩放（%）"],70,130,5,function()return DB().scalePercent end,function(v)DB().scalePercent=v end,Refresh)
+            L:Dropdown(260,T["副本排序："],{{text=T["赛季评分"],value="score"},{text=T["本周最高层数"],value="weekly"},{text=T["副本名称"],value="name"}},
                 function()return DB().sortBy end,function(v)DB().sortBy=v;page=1 end,Refresh)
         end},
-        {name="副本与传送",width=150,build=function(_,L)
-            L:Section("副本卡片")
-            L:Check("显示赛季最佳层数",function()return DB().showBest end,function(v)DB().showBest=v end,Refresh)
-            L:Check("显示副本赛季评分",function()return DB().showScore end,function(v)DB().showScore=v end,Refresh)
-            L:Check("启用手动点击传送",function()return DB().teleport end,function(v)DB().teleport=v end,Refresh)
-            L:Section("宝库")
-            L:Button(200,"查看宏伟宝库",openVault)
+        {name=T["副本与传送"],width=150,build=function(_,L)
+            L:Section(T["副本卡片"])
+            L:Check(T["显示赛季最佳层数"],function()return DB().showBest end,function(v)DB().showBest=v end,Refresh)
+            L:Check(T["显示副本赛季评分"],function()return DB().showScore end,function(v)DB().showScore=v end,Refresh)
+            L:Check(T["启用手动点击传送"],function()return DB().teleport end,function(v)DB().teleport=v end,Refresh)
+            L:Section(T["宝库"])
+            L:Button(200,T["查看宏伟宝库"],openVault)
         end},
-        {name="兼容与刷新",width=150,build=function(_,L)
-            L:Check("隐藏 Kogo 旧本周看板",function()return DB().replaceKogo end,function(v)DB().replaceKogo=v end,Refresh)
-            L:Button(200,"重新请求游戏数据",function()RequestData();Queue()end)
+        {name=T["兼容与刷新"],width=150,build=function(_,L)
+            L:Check(T["隐藏 Kogo 旧本周看板"],function()return DB().replaceKogo end,function(v)DB().replaceKogo=v end,Refresh)
+            L:Button(200,T["重新请求游戏数据"],function()RequestData();Queue()end)
         end},
     })
 end
 ns.MythicPlus={Refresh=Refresh,GetDB=DB,RequestData=RequestData}
-ns.RegisterModule({id=ID,name="大秘境信息优化",desc="副本成绩、本周记录与传送。",
+ns.RegisterModule({id=ID,name=T["大秘境信息优化"],desc=T["副本成绩、本周记录与传送。"],
     defaults=defaults,BuildOptions=BuildOptions,OnEnable=init,
     OnDisable=function()if ns.PartyKeystones then ns.PartyKeystones.Stop()end;Refresh()end,
     OnToggle=function(_,on)if on then init()end;Refresh()end})

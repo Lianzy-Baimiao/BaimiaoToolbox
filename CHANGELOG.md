@@ -1,3 +1,71 @@
+## 1.9.17 — 2026-10-05
+
+Upgrade notes: 1.9.16 → 1.9.17 · 2026-10-05
+
+## English
+
+### Localization
+
+- Added English, Traditional Chinese, and Korean alongside Simplified Chinese. The interface automatically follows the game client: zhCN, zhTW, enUS/enGB, or koKR; other client languages fall back to English.
+- Each language has a separate Lua catalog with 994 messages covering the workspace, module settings, panels, help, and chat output. No manual language selector or Japanese catalog is added.
+- Preserved existing custom names, favorites, search terms, templates, and saved category IDs. Native game names use client-localized data where available.
+- Added English/Traditional Chinese action aliases and ST branch syntax while keeping legacy commands compatible. Auction controls allow more space for longer translations; Korean uses client-native fonts.
+
+### Auction House stacking
+
+- Attached the companion to the native Auction House window instead of repeatedly copying frame levels. The panel and its controls now follow the native window's raising/lowering, strata, and visibility together, fixing inconsistent overlap with target portraits and addons such as Decursive.
+- Fixed inherited scaling to keep matching heights. Standalone previews and settings transitions remain available; reattachment is deferred during combat, and closing cancels pending display requests. No native or third-party frame levels are changed.
+
+### Tooltip readability
+
+- Split long tracked-restock, retry, craft-count, mount, and other help text into readable lines in all four languages; added missing word wrapping for dynamic warnings and custom text.
+- Kept material-quality help short and multiline. Restock search buttons remain tooltip-free; native item and spell tooltips are unchanged.
+
+### Light theme
+
+- Reworked light surfaces with neutral gray/white backgrounds, darker text, and restrained accents; reduced tinted backgrounds and slider glare.
+- Removed black outlines/shadows from light-panel text without changing saved font-outline preferences or unrelated UI fonts.
+- Fixed stale dark borders after editing, hovering, or switching themes; improved theme-aware status, dropdown, and stat-label colors.
+
+### Upgrade and validation
+
+- Fully exit the game before installing, then restart to load the new locale files. Keep existing SavedVariables; no settings reset is required. Retail only.
+- 503 offline tests and Lua 5.1 syntax checks for all 24 runtime Lua files passed. The reported auction stacking scenario was confirmed in game; this does not represent visual testing on every language client or addon combination.
+- Purchase behavior is unchanged: each item still requires a purchase click. This is not unattended buying.
+
+---
+
+## 中文
+
+### 多语言
+
+- 在简体中文基础上新增英文、繁体中文、韩语界面，自动跟随客户端：zhCN、zhTW、enUS/enGB、koKR；其他客户端语言回退英文。
+- 每种语言使用独立 Lua 文件，覆盖工作台、模块设置、功能面板、帮助与聊天消息，共 994 条。不增加手动语言切换或日语文件。
+- 保留已有方案名、收藏、搜索词、模板和分类存档标识；物品、法术等名称优先使用客户端本地化数据。
+- 新增英文 / 繁体动作别名与 ST 分支语法，兼容旧命令；为较长译文调整拍卖行控件空间，韩语使用客户端原生字体。
+
+### 拍卖行窗口层级
+
+- 助手真正挂接到原生拍卖行窗口，不再反复复制层级数值；面板与按钮整体跟随原生窗口升降、分层和显隐，修复与目标头像、Decursive 等界面遮挡顺序不一致的问题。
+- 修正继承缩放，保持与拍卖行等高；保留独立预览及设置切换，战斗中延后重新挂接，关闭时取消待显示请求。不修改原生窗口或其他插件的层级。
+
+### 鼠标提示排版
+
+- 追踪补货、重试购买、制作次数、坐骑等长说明按语义分行，四种语言同步调整；动态警告和自定义文本补齐自动折行。
+- 材料品质提示保持简短、多行；补货搜索按钮继续不显示鼠标说明，原生物品 / 法术提示不变。
+
+### 浅色主题
+
+- 使用中性灰白背景、深色文字和更克制的强调色，减少偏色底板与滑块高光。
+- 去除浅色面板文字的黑色描边和阴影，保留已有轮廓字体偏好，不修改无关界面字体。
+- 修复编辑、悬停和切换主题后的边框残留，优化状态文字、下拉箭头及属性标签的主题配色。
+
+### 升级与验证
+
+- 请完全退出游戏后安装，再重新启动以加载新增语言文件。保留 SavedVariables，无需清空设置；仅支持正式服。
+- 503 项离线测试及全部 24 个运行 Lua 文件的 Lua 5.1 语法检查通过。本次反馈的拍卖行遮挡场景已获游戏内确认，不代表所有语言客户端和插件组合均已实机验证。
+- 购买流程不变：仍需每项点击购买，不是无人值守购买。
+
 ## 1.9.16 — 2026-10-05
 
 Upgrade notes: 1.9.15 → 1.9.16 · 2026-10-05

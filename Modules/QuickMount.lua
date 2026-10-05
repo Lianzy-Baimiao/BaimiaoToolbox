@@ -1,4 +1,5 @@
 local ADDON, ns = ...
+local T = ns.L
 
 --------------------------------------------------------------------------------
 -- 模块：快捷按钮（原名“快捷坐骑”，后来加了扩展按钮，名字就不再只是坐骑了）
@@ -35,29 +36,30 @@ local MODULE_ID = "quickmount"
 -- 用途 -> 中文名
 local CATS = { "fly", "repair", "ah", "passenger", "water" }
 local CAT_LABEL = {
-    fly = "飞行", repair = "修理", ah = "拍卖行", passenger = "载人", water = "水下",
+    fly = T["飞行"], repair = T["修理"], ah = T["拍卖行"], passenger = T["载人"], water = T["水下"],
 }
 
--- 各用途的“自动默认”候选，按【中文名】匹配你已收藏的坐骑（找到第一个就用）。
--- 中文客户端下按名字匹配最直观、也不依赖记对 id。手动设的优先于这里。
--- 名字必须和游戏内坐骑名完全一致；没匹配到时到设置里“设为当前”手动抓取即可。
+-- Legacy name fallback only. Prefer stable spell IDs below so automatic mounts
+-- work in every client language. Explicit user bindings always take priority.
 local AUTO_BY_NAME = {
-    repair    = { "顶级探险家的牦牛", "旅行者的苔原猛犸象" },
-    ah        = { "鎏金雷龙" },
-    passenger = { "沙石幼龙" },
-    water     = { "驯服的海马" },
+    repair    = { T["顶级探险家的牦牛"], T["旅行者的苔原猛犸象"] },
+    ah        = { T["鎏金雷龙"] },
+    passenger = { T["沙石幼龙"] },
+    water     = { T["驯服的海马"] },
     -- fly 不给默认：留空 = “随机收藏坐骑”，交给游戏按环境选。
 }
 
--- spellID 兜底候选（名字没匹配到时再按 spellID 试一遍）。
+-- Stable default candidates. Names and icons still come from the mount journal.
 local AUTO_BY_SPELL = {
     repair = { 122708, 61425, 61447 },
-    passenger = { 122708, 61425, 61447, 75973 },
+    ah = { 465235 },
+    passenger = { 93326, 122708, 61425, 61447, 75973 },
+    water = { 98718 },
 }
 
 -- 短名字数上限的默认值。故意不写进 defaults：默认值改一次就会被存档里的旧默认顶住，
 -- 所以放在代码里兜底，只有用户显式调过滑块才会存进 DB。
-local DEFAULT_LABEL_CHARS = 2
+local DEFAULT_LABEL_CHARS = ns.locale == "enUS" and 5 or 2
 
 local defaults = {
     button = {
@@ -144,16 +146,16 @@ local function ResolveMount(cat)
     if id then return id end
 
     local byName, bySpell = BuildOwned()
-    local names = AUTO_BY_NAME[cat]
-    if names then
-        for _, nm in ipairs(names) do
-            if byName[nm] then return byName[nm] end
-        end
-    end
     local spells = AUTO_BY_SPELL[cat]
     if spells then
         for _, sid in ipairs(spells) do
             if bySpell[sid] then return bySpell[sid] end
+        end
+    end
+    local names = AUTO_BY_NAME[cat]
+    if names then
+        for _, nm in ipairs(names) do
+            if byName[nm] then return byName[nm] end
         end
     end
     return nil
@@ -181,14 +183,14 @@ end
 local DEFAULT_BINDINGS = {
     fly="LEFT", repair="SHIFT-LEFT", ah="CTRL-LEFT", passenger="ALT-LEFT", water="RIGHT",
 }
-local BINDING_CHOICES = {{value="NONE", text="不绑定"}}
-local BINDING_LABEL = {NONE="不绑定"}
+local BINDING_CHOICES = {{value="NONE", text=T["不绑定"]}}
+local BINDING_LABEL = {NONE=T["不绑定"]}
 for _, modifier in ipairs({"", "SHIFT-", "CTRL-", "ALT-", "CTRL-SHIFT-", "ALT-SHIFT-", "ALT-CTRL-", "ALT-CTRL-SHIFT-"}) do
     for _, mouse in ipairs({"LEFT", "RIGHT"}) do
         if mouse ~= "RIGHT" or not modifier:find("ALT", 1, true) then
             local key = modifier .. mouse
             local label = modifier:gsub("ALT", "Alt"):gsub("CTRL", "Ctrl"):gsub("SHIFT", "Shift"):gsub("-", "+")
-                .. (mouse == "LEFT" and "左键" or "右键")
+                .. (mouse == "LEFT" and T["左键"] or T["右键"])
             BINDING_CHOICES[#BINDING_CHOICES+1] = {value=key, text=label}
             BINDING_LABEL[key] = label
         end
@@ -241,11 +243,11 @@ end
 
 local function Summon(cat)
     if InCombatLockdown() then
-        ns.Print("快捷按钮：战斗中不能召唤坐骑。")
+        ns.Print(T["快捷按钮：战斗中不能召唤坐骑。"])
         return
     end
     if not (C_MountJournal and C_MountJournal.SummonByID) then
-        ns.Print("快捷按钮：坐骑接口不可用。")
+        ns.Print(T["快捷按钮：坐骑接口不可用。"])
         return
     end
 
@@ -254,7 +256,7 @@ local function Summon(cat)
         -- 校验拥有且可用
         local name, _, _, _, isUsable, _, _, _, _, _, isCollected = C_MountJournal.GetMountInfoByID(id)
         if not isCollected then
-            ns.Print("快捷按钮：" .. (CAT_LABEL[cat] or cat) .. "坐骑你还没收藏，请在设置中重新绑定。")
+            ns.Print(T["快捷按钮："] .. (CAT_LABEL[cat] or cat) .. T["坐骑你还没收藏，请在设置中重新绑定。"])
             if cat == "fly" then C_MountJournal.SummonByID(0) end
             return
         end
@@ -262,7 +264,7 @@ local function Summon(cat)
     else
         -- 只有飞行用途可回退到随机；随机收藏并不保证满足水下等专门用途。
         if cat ~= "fly" then
-            ns.Print("快捷按钮：未设置" .. (CAT_LABEL[cat] or cat) .. "坐骑（也没找到合适的默认），请在设置里指定；不会改用随机坐骑。")
+            ns.Print(T["快捷按钮：未设置"] .. (CAT_LABEL[cat] or cat) .. T["坐骑（也没找到合适的默认），请在设置里指定；不会改用随机坐骑。"])
             return
         end
         C_MountJournal.SummonByID(0)
@@ -273,11 +275,11 @@ end
 local function CaptureCurrent(cat)
     local id = GetActiveMountID()
     if not id then
-        ns.Print("快捷按钮：请先骑上你想设为「" .. (CAT_LABEL[cat] or cat) .. "」的坐骑，再来抓取。")
+        ns.Print(T["快捷按钮：请先骑上你想设为「"] .. (CAT_LABEL[cat] or cat) .. T["」的坐骑，再来抓取。"])
         return false
     end
     DB().mounts[cat] = id
-    ns.Print(("快捷按钮：已把「%s」设为 %s 坐骑。"):format(MountName(id) or ("#" .. id), CAT_LABEL[cat] or cat))
+    ns.Print((T["快捷按钮：已把「%s」设为 %s 坐骑。"]):format(MountName(id) or ("#" .. id), CAT_LABEL[cat] or cat))
     return true
 end
 
@@ -316,7 +318,7 @@ local COLLAPSE_TAB_POS = {
     UP    = {point="LEFT",rel="RIGHT",dx=8,dy=0},
     DOWN  = {point="LEFT",rel="RIGHT",dx=8,dy=0},
 }
-local KIND_LABEL = { macro = "动作", spell = "技能", toy = "玩具", item = "物品" }
+local KIND_LABEL = { macro = T["动作"], spell = T["技能"], toy = T["玩具"], item = T["物品"] }
 
 -- 特殊动作：登出/退组这类是受保护动作，插件不能直接调用，统一走安全按钮的 macro 属性
 -- （与本机 EllesmereUI 处理 /logout 的做法一致：它的注释写着 /logout 和 /reload 都需要
@@ -351,14 +353,14 @@ local function DefAction(names, label, macrotext, icon, short)
     local act = { label = label, macrotext = macrotext, icon = icon, short = short }
     for _, n in ipairs(names) do ACTIONS[n] = act end
 end
-DefAction({ "小退", "登出", "下线", "回到角色选择" }, "小退（回到角色选择）", "/logout",
-    [[Interface\Icons\inv_misc_rune_01]], "小退")
-DefAction({ "退组", "离队", "离开队伍" }, "退组", "/run C_PartyInfo.LeaveParty()",
-    [[Interface\Icons\inv_misc_groupneedmore]], "退组")
-DefAction({ "重载", "重载界面", "刷新界面" }, "重载界面", "/reload",
-    [[Interface\Icons\trade_engineering]], "重载")
-DefAction({ "退出游戏", "关闭游戏" }, "退出游戏", "/quit",
-    [[Interface\Icons\spell_arcane_portalstormwind]], "退出")
+DefAction({ "小退", "登出", "下线", "回到角色选择", "下線", "回到角色選擇", "logout" }, T["小退（回到角色选择）"], "/logout",
+    [[Interface\Icons\inv_misc_rune_01]], T["小退"])
+DefAction({ "退组", "离队", "离开队伍", "退組", "離隊", "離開隊伍", "leave" }, T["退组"], "/run C_PartyInfo.LeaveParty()",
+    [[Interface\Icons\inv_misc_groupneedmore]], T["退组"])
+DefAction({ "重载", "重载界面", "刷新界面", "重載", "重載介面", "重新載入", "重新載入介面", "reload" }, T["重载界面"], "/reload",
+    [[Interface\Icons\trade_engineering]], T["重载"])
+DefAction({ "退出游戏", "关闭游戏", "退出遊戲", "關閉遊戲", "quit" }, T["退出游戏"], "/quit",
+    [[Interface\Icons\spell_arcane_portalstormwind]], T["退出"])
 
 -- 特殊动作条目（kind = "macro"：安全按钮按 macrotext 执行）。
 -- 图标在每次重建时现取，首次没取到、之后数据就绪了也能自己补上。
@@ -372,7 +374,7 @@ local function ResolveAction(act, iconID)
     }
 end
 local PREFIX_KIND = {
-    spell = "spell", ["技能"] = "spell", ["法术"] = "spell",
+    spell = "spell", ["技能"] = "spell", ["法术"] = "spell", ["法術"] = "spell",
     toy = "toy", ["玩具"] = "toy",
     item = "item", ["物品"] = "item",
 }
@@ -382,7 +384,7 @@ local PREFIX_KIND = {
 -- names for this session and use item-cache lookup before the filtered scan.
 local toyNameIDs, toyDataRequests = {}, {}
 -- Verified item ID; also resolves our built-in example on a cold name cache.
-local knownToyNames = { ["奥术秘社的私人钥匙"] = 253629 }
+local knownToyNames = { ["奥术秘社的私人钥匙"] = 253629, [T["奥术秘社的私人钥匙"]] = 253629 }
 local function ToyInfo(id)
     if not (id and C_ToyBox and C_ToyBox.GetToyInfo) then return nil end
     local _, name, icon = C_ToyBox.GetToyInfo(id)
@@ -546,7 +548,7 @@ local function ParseExtraLineCore(line)
     if prefix and value then
         local pkey = (prefix:gsub("^%s+", ""):gsub("%s+$", "")):lower()
         -- 动作前缀：动作:小退 / action:小退 / 命令:退组
-        if pkey == "动作" or pkey == "action" or pkey == "命令" or pkey == "cmd" then
+        if pkey == "动作" or pkey == "動作" or pkey == "action" or pkey == "命令" or pkey == "cmd" then
             local act, iconID = ParseActionToken(value)
             return act and ResolveAction(act, iconID)
         end
@@ -790,7 +792,7 @@ local function EnsureExtraButton(index)
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
         if e.kind == "macro" then
             GameTooltip:SetText(e.name, 1, 1, 1)
-            GameTooltip:AddLine(e.macrotext, 0.6, 0.9, 1)
+            GameTooltip:AddLine(e.macrotext, 0.6, 0.9, 1, true)
         elseif e.kind == "spell" then
             GameTooltip:SetSpellByID(e.id)
         elseif e.kind == "toy" then
@@ -811,7 +813,7 @@ local function EnsureExtraButton(index)
         local e = self._entry
         if not e or e.kind ~= "macro" then return end
         if e.macrotext:find("LeaveParty", 1, true) and not IsInGroup() then
-            ns.Print("退组：当前没有队伍。")
+            ns.Print(T["退组：当前没有队伍。"])
         end
     end)
 
@@ -858,18 +860,18 @@ end
 
 -- 扩展按钮的完整说明：页面只留一行提示，细节放在输入框/按钮的悬停提示里（避免撑开设置页）。
 local EXTRA_HELP = {
-    "扩展按钮 —— 完整说明（每行一条，-- 开头是注释、空行忽略；设置改动立刻生效）：",
-    "  技能:460905  或  技能:炉石        施法（空格/全角冒号都认）",
-    "  玩具:253629  或  玩具:奥术秘社的私人钥匙    用玩具（这把钥匙不受玩具箱筛选影响）",
-    "  其他玩具优先用物品 ID；未缓存的名称若被玩具箱筛选隐藏，可先清除筛选让它识别一次",
-    "  物品:123456                      用背包里的物品",
-    "  小退 / 退组 / 重载界面 / 退出游戏     受保护动作，走安全按钮执行（也可写“动作:小退”）",
-    "  退组 @135824                     @ 后面跟法术或物品 id，换这个按钮的图标",
-    "  玩具:216665 #银行                 行尾 #短名 = 按钮下面显示这几个字（不给就自动截断）",
-    "  省略前缀：纯数字按 技能→玩具→物品 依次识别；纯名称先查玩具再查法术书（最后查背包）",
-    "  找不到名字就改用 ID。网上的玩具 ID 常是它的“使用法术 ID”（战团银行距离抑制器＝法术 460905、",
-    "  玩具物品 216665），这种会按同名玩具自动识别，包在身上也不会点不动。",
-    "  逐行确认认成了什么：设置里点「检查配置」，或输入 /qm check。",
+    T["扩展按钮 —— 完整说明（每行一条，-- 开头是注释、空行忽略；设置改动立刻生效）："],
+    T["  技能:460905  或  技能:炉石        施法（空格/全角冒号都认）"],
+    T["  玩具:253629  或  玩具:奥术秘社的私人钥匙    用玩具（这把钥匙不受玩具箱筛选影响）"],
+    T["  其他玩具优先用物品 ID；未缓存的名称若被玩具箱筛选隐藏，可先清除筛选让它识别一次"],
+    T["  物品:123456                      用背包里的物品"],
+    T["  小退 / 退组 / 重载界面 / 退出游戏     受保护动作，走安全按钮执行（也可写“动作:小退”）"],
+    T["  退组 @135824                     @ 后面跟法术或物品 id，换这个按钮的图标"],
+    T["  玩具:216665 #银行                 行尾 #短名 = 按钮下面显示这几个字（不给就自动截断）"],
+    T["  省略前缀：纯数字按 技能→玩具→物品 依次识别；纯名称先查玩具再查法术书（最后查背包）"],
+    T["  找不到名字就改用 ID。网上的玩具 ID 常是它的“使用法术 ID”（战团银行距离抑制器＝法术 460905、"],
+    T["  玩具物品 216665），这种会按同名玩具自动识别，包在身上也不会点不动。"],
+    T["  逐行确认认成了什么：设置里点「检查配置」，或输入 /qm check。"],
 }
 local function PrintExtraHelp()
     for _, line in ipairs(EXTRA_HELP) do ns.Print(line) end
@@ -881,10 +883,10 @@ local function ExtraCheckLines()
     local lines = EachExtraLine(cfg.text)
     local out = {}
     if #lines == 0 then
-        out[#out + 1] = "配置是空的（设置里每行填一条技能/玩具/物品/动作）。"
+        out[#out + 1] = T["配置是空的（设置里每行填一条技能/玩具/物品/动作）。"]
         return out
     end
-    out[#out + 1] = ("共 %d 行 ——"):format(#lines)
+    out[#out + 1] = (T["共 %d 行 ——"]):format(#lines)
     for i, line in ipairs(lines) do
         local ok, entry = pcall(ParseExtraLine, line)
         if ok and entry then
@@ -892,21 +894,21 @@ local function ExtraCheckLines()
             local id = entry.id and (" #" .. entry.id) or ""
             out[#out + 1] = ("%d) %s → %s%s %s"):format(i, line, what, id, entry.name or "")
         else
-            out[#out + 1] = ("|cffff6060%d) %s → 未识别|r：名称要与已收集的玩具 / 已学法术 / 背包物品" ..
-                "完全一致，或改用 ID；动作可填 小退/退组/重载界面/退出游戏"):format(i, line)
+            out[#out + 1] = (T["|cffff6060%d) %s → 未识别|r：名称要与已收集的玩具 / 已学法术 / 背包物品"] ..
+                T["完全一致，或改用 ID；动作可填 小退/退组/重载界面/退出游戏"]):format(i, line)
         end
     end
     if not ns.IsModuleEnabled(MODULE_ID) then
-        out[#out + 1] = "提示：本模块被总开关关掉了，按钮不会显示。"
+        out[#out + 1] = T["提示：本模块被总开关关掉了，按钮不会显示。"]
     elseif not cfg.enabled then
-        out[#out + 1] = "提示：扩展开关当前是关闭的，按钮不会显示。"
+        out[#out + 1] = T["提示：扩展开关当前是关闭的，按钮不会显示。"]
     end
     return out
 end
 
 -- 命令 /qm check：把体检结果打到聊天框（用户主动敲的，才输出）。
 local function CheckExtraConfig()
-    ns.Print("扩展按钮 · 检查配置")
+    ns.Print(T["扩展按钮 · 检查配置"])
     for _, line in ipairs(ExtraCheckLines()) do ns.Print("  " .. line) end
 end
 
@@ -927,7 +929,7 @@ local function UpdateCollapseTab()
     tab:ClearAllPoints()
     tab:SetPoint(pos.point, button, pos.rel, pos.dx, pos.dy)
     local pending=InCombatLockdown() and appliedCollapsed~=nil and collapsed~=appliedCollapsed
-    tab:SetText(pending and (collapsed and "待收起" or "待展开") or ((collapsed and "展开 " or "收起 ")..ok))
+    tab:SetText(pending and (collapsed and T["待收起"] or T["待展开"]) or ((collapsed and T["展开 "] or T["收起 "])..ok))
     tab.pending=pending
     tab:SetShown(tab.hoverActive == true)
     if GameTooltip:IsOwned(tab) and GameTooltip:IsShown() then tab:GetScript("OnEnter")(tab) end
@@ -1092,15 +1094,15 @@ local function CreateButton()
 
     function button:RefreshTooltip()
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("快捷按钮", 1, 1, 1)
+        GameTooltip:SetText(T["快捷按钮"], 1, 1, 1)
         local bindings = GetBindings()
         for _, cat in ipairs(CATS) do
             local key = bindings[cat]
-            GameTooltip:AddLine(CAT_LABEL[cat] .. "：" .. BINDING_LABEL[key], 0.85, 0.85, 0.85)
+            GameTooltip:AddLine(CAT_LABEL[cat] .. "：" .. BINDING_LABEL[key], 0.85, 0.85, 0.85, true)
         end
-        GameTooltip:AddLine("Alt+右键：打开设置（/qm）", 1, 0.82, 0)
-        GameTooltip:AddLine("中键：展开/收起扩展按钮；悬停也可显示控制钮", 0.85, 0.85, 0.85)
-        GameTooltip:AddLine("解锁可拖动；锁定时 Alt/Ctrl+左键拖动", 0.65, 0.65, 0.65)
+        GameTooltip:AddLine(T["Alt+右键：打开设置（/qm）"], 1, 0.82, 0, true)
+        GameTooltip:AddLine(T["中键：展开/收起扩展按钮；悬停也可显示控制钮"], 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(T["解锁可拖动；锁定时 Alt/Ctrl+左键拖动"], 0.65, 0.65, 0.65, true)
         GameTooltip:Show()
     end
     button:SetScript("OnEnter", function(self) self:RefreshTooltip() end)
@@ -1136,11 +1138,11 @@ local function CreateButton()
         self.hoverActive=true; self.hideRemaining=nil
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         if self.pending then
-            GameTooltip:SetText(DB().extra.collapsed and "等待脱战后收起" or "等待脱战后展开")
-            GameTooltip:AddLine("战斗中不能改变安全按钮的显示。再次点击可取消本次等待。",1,0.8,0.3,true)
+            GameTooltip:SetText(DB().extra.collapsed and T["等待脱战后收起"] or T["等待脱战后展开"])
+            GameTooltip:AddLine(T["战斗中不能改变安全按钮的显示。再次点击可取消本次等待。"],1,0.8,0.3,true)
         else
-            GameTooltip:SetText(DB().extra.collapsed and "展开扩展按钮" or "收起扩展按钮",1,1,1)
-            GameTooltip:AddLine("中键点击主坐骑图标也可切换；不会召唤坐骑。",1,1,1,true)
+            GameTooltip:SetText(DB().extra.collapsed and T["展开扩展按钮"] or T["收起扩展按钮"],1,1,1)
+            GameTooltip:AddLine(T["中键点击主坐骑图标也可切换；不会召唤坐骑。"],1,1,1,true)
         end
         GameTooltip:Show()
     end)
@@ -1191,10 +1193,10 @@ end
 -- 用法：/qm diag（打开过设置页之后再跑，才拿得到控件）
 local diagWidgets = {}
 local function DiagWidgets()
-    ns.Print("快捷按钮 · 控件自检")
+    ns.Print(T["快捷按钮 · 控件自检"])
     local function dumpWidget(f, label)
         if not f then
-            ns.Print(("  %s：没拿到（先打开一次本模块的设置页再跑）"):format(label))
+            ns.Print((T["  %s：没拿到（先打开一次本模块的设置页再跑）"]):format(label))
             return
         end
         local n = 0
@@ -1205,19 +1207,19 @@ local function DiagWidgets()
                 local sx, sy
                 if r.GetShadowOffset then sx, sy = r:GetShadowOffset() end
                 local sp = r.GetSpacing and r:GetSpacing() or "?"
-                ns.Print(("  %s #%d 文本=[%s]"):format(label, n, tostring(r:GetText())))
-                ns.Print(("      字体=%s 字号=%s 标记=[%s] 阴影=%s,%s 行距=%s"):format(
+                ns.Print((T["  %s #%d 文本=[%s]"]):format(label, n, tostring(r:GetText())))
+                ns.Print((T["      字体=%s 字号=%s 标记=[%s] 阴影=%s,%s 行距=%s"]):format(
                     tostring(path), tostring(size), tostring(flags),
                     tostring(sx), tostring(sy), tostring(sp)))
             end
         end
-        ns.Print(("  %s：FontString 共 %d 个（>1 且文本相同 = 字被画了两遍）"):format(label, n))
+        ns.Print((T["  %s：FontString 共 %d 个（>1 且文本相同 = 字被画了两遍）"]):format(label, n))
     end
-    dumpWidget(diagWidgets.checkBtn, "按钮·检查配置")
-    dumpWidget(diagWidgets.helpBtn, "按钮·详细说明")
-    dumpWidget(diagWidgets.cfgBox, "扩展配置首行输入框")
+    dumpWidget(diagWidgets.checkBtn, T["按钮·检查配置"])
+    dumpWidget(diagWidgets.helpBtn, T["按钮·详细说明"])
+    dumpWidget(diagWidgets.cfgBox, T["扩展配置首行输入框"])
     local p, s, fl = GameFontNormal:GetFont()
-    ns.Print(("  参照：GameFontNormal = %s / %s / [%s]"):format(tostring(p), tostring(s), tostring(fl)))
+    ns.Print((T["  参照：GameFontNormal = %s / %s / [%s]"]):format(tostring(p), tostring(s), tostring(fl)))
 end
 
 -- 设置只负责拆分/编辑，运行时仍读取 extra.text：不更换存档结构、不改安全执行链。
@@ -1226,18 +1228,18 @@ local function TrimExtra(value)
     return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 local EDIT_KINDS = {
-    {value="auto",text="自动识别"}, {value="toy",text="玩具"}, {value="spell",text="技能"},
-    {value="item",text="物品"}, {value="action",text="快捷动作"}, {value="comment",text="注释"},
+    {value="auto",text=T["自动识别"]}, {value="toy",text=T["玩具"]}, {value="spell",text=T["技能"]},
+    {value="item",text=T["物品"]}, {value="action",text=T["快捷动作"]}, {value="comment",text=T["注释"]},
 }
-local EDIT_PREFIX = {toy="玩具:", spell="技能:", item="物品:", action="动作:"}
+local EDIT_PREFIX = {toy=T["玩具:"], spell=T["技能:"], item=T["物品:"], action=T["动作:"]}
 local ROW_HELP = {
-    "点「新增一行」，先选类型，再填名称或 ID；快捷动作直接从下拉列表选择。",
-    "短名可留空（自动截取）；填写后直接用于按钮标签，不用加 #。",
-    "文本回车 / 失焦保存，Esc 取消；每条下方显示识别结果。",
-    "↑ / ↓ 调整按钮顺序；删除只移除这一条，空行与注释不会生成按钮。",
-    "玩具推荐填写物品 ID，例如奥术秘社的私人钥匙：253629。",
-    "已识别不代表当前可用，仍受收藏、背包、冷却与游戏场景限制。",
-    "旧配置按原顺序载入，不会因未识别而丢弃；原来的 @图标设置也会保留。",
+    T["点「新增一行」，先选类型，再填名称或 ID；快捷动作直接从下拉列表选择。"],
+    T["短名可留空（自动截取）；填写后直接用于按钮标签，不用加 #。"],
+    T["文本回车 / 失焦保存，Esc 取消；每条下方显示识别结果。"],
+    T["↑ / ↓ 调整按钮顺序；删除只移除这一条，空行与注释不会生成按钮。"],
+    T["玩具推荐填写物品 ID，例如奥术秘社的私人钥匙：253629。"],
+    T["已识别不代表当前可用，仍受收藏、背包、冷却与游戏场景限制。"],
+    T["旧配置按原顺序载入，不会因未识别而丢弃；原来的 @图标设置也会保留。"],
 }
 local function DecodeExtraRow(raw)
     local model = {raw=raw, kind="auto", value=TrimExtra(raw), short=""}
@@ -1252,7 +1254,7 @@ local function DecodeExtraRow(raw)
     if prefix then
         local key=TrimExtra(prefix):lower()
         local kind=PREFIX_KIND[key]
-        if key=="动作" or key=="action" or key=="命令" or key=="cmd" then kind="action" end
+        if key=="动作" or key=="動作" or key=="action" or key=="命令" or key=="cmd" then kind="action" end
         if kind then model.kind=kind;model.value=TrimExtra(value) end
     elseif ParseActionToken(model.value) then
         model.kind="action"
@@ -1289,7 +1291,7 @@ local function BuildExtraEditor(panel,L,onResize)
     -- 本块拥有动态高度，避免 L:Finalize() 后丢失卡片锚点。
     L._card=nil
     local R=ns.UI.NewLayout(editor);R.indent=0;R.y=0
-    R:Text("选择类型，填写名称 / ID；短名可留空。回车或失焦保存，Esc 取消。",true)
+    R:Text(T["选择类型，填写名称 / ID；短名可留空。回车或失焦保存，Esc 取消。"],true)
     local function allowed() return not InCombatLockdown() end
     local function finishEdits(discardRow)
         for _,row in ipairs(editor.rows) do
@@ -1321,14 +1323,14 @@ local function BuildExtraEditor(panel,L,onResize)
         editor.models[#editor.models+1]=DecodeExtraRow("")
         persist()
     end
-    editor.add=R:Button(120,"＋ 新增一行",addRow)
-    editor.check=R:Button(110,"检查配置",function(self)
-        ShowLinesTooltip(self,"扩展按钮 · 检查配置",ExtraCheckLines())
+    editor.add=R:Button(120,T["＋ 新增一行"],addRow)
+    editor.check=R:Button(110,T["检查配置"],function(self)
+        ShowLinesTooltip(self,T["扩展按钮 · 检查配置"],ExtraCheckLines())
     end,true,editor.add)
-    editor.help=R:Button(100,"使用说明",function(self)
-        ShowLinesTooltip(self,"逐条编辑扩展按钮",ROW_HELP)
+    editor.help=R:Button(100,T["使用说明"],function(self)
+        ShowLinesTooltip(self,T["逐条编辑扩展按钮"],ROW_HELP)
     end,true,editor.check)
-    AttachHoverTooltip(editor.help,"逐条编辑扩展按钮",function() return ROW_HELP end)
+    AttachHoverTooltip(editor.help,T["逐条编辑扩展按钮"],function() return ROW_HELP end)
     diagWidgets.checkBtn,diagWidgets.helpBtn=editor.check,editor.help
     R:step(8)
     local width=editor:GetWidth()
@@ -1345,14 +1347,14 @@ local function BuildExtraEditor(panel,L,onResize)
         if ns.UI.StyleText then ns.UI.StyleText(fs,role or "muted") end
         return fs
     end
-    label(editor,"类型",kindX,R.y,kindWidth)
-    label(editor,"名称 / ID（动作可直接选）",valueX,R.y,valueWidth)
-    label(editor,"短名（可选）",shortX,R.y,90)
+    label(editor,T["类型"],kindX,R.y,kindWidth)
+    label(editor,T["名称 / ID（动作可直接选）"],valueX,R.y,valueWidth)
+    label(editor,T["短名（可选）"],shortX,R.y,90)
     R:step(24)
     local rowsTop=R.y
     editor.summary=label(editor,"",0,0,width,"text")
     editor.summary:SetHeight(36);editor.summary:SetWordWrap(true)
-    editor.addBottom=R:Button(120,"＋ 新增一行",addRow)
+    editor.addBottom=R:Button(120,T["＋ 新增一行"],addRow)
 
     local function createRow(index)
         local row=CreateFrame("Frame",nil,editor)
@@ -1381,18 +1383,18 @@ local function BuildExtraEditor(panel,L,onResize)
         C.indent=shortX;C.y=0
         row.short=C:Box(82,28,false,function() return row.model.short end,
             function(value) change("short",value:gsub("[%s#]","")) end,nil,true)
-        AttachHoverTooltip(row.value,"名称 / ID",function()
-            return {row.model.value, "只填名称或 ID，不用写类型前缀；回车 / 失焦保存，Esc 取消。",
-                "玩具推荐用物品 ID；未识别的旧行会原样保留，修正后即可重试。"}
+        AttachHoverTooltip(row.value,T["名称 / ID"],function()
+            return {row.model.value, T["只填名称或 ID，不用写类型前缀；回车 / 失焦保存，Esc 取消。"],
+                T["玩具推荐用物品 ID；未识别的旧行会原样保留，修正后即可重试。"]}
         end)
-        AttachHoverTooltip(row.short,"按钮短名",function()
-            return {"留空自动截取；自定义时不用加 #，空格会自动去除。"}
+        AttachHoverTooltip(row.short,T["按钮短名"],function()
+            return {T["留空自动截取；自定义时不用加 #，空格会自动去除。"]}
         end)
         C.indent=valueX;C.y=-2
         row.action=C:Dropdown(valueWidth,"",function()
-            local list={{value="",text="请选择快捷动作"}}
+            local list={{value="",text=T["请选择快捷动作"]}}
             local current=row.model.value
-            local standard={"小退","退组","重载界面","退出游戏"}
+            local standard=ns.locale=="zhCN" and {"小退","退组","重载界面","退出游戏"} or {"logout","leave","reload","quit"}
             local known=false
             for _,value in ipairs(standard) do
                 list[#list+1]={value=value,text=ACTIONS[value].label}
@@ -1420,7 +1422,7 @@ local function BuildExtraEditor(panel,L,onResize)
         C.indent=downX;C.y=-2
         row.down=C:Button(24,"↓",function() move(1) end)
         C.indent=deleteX;C.y=-2
-        row.delete=C:Button(48,"删除",function()
+        row.delete=C:Button(48,T["删除"],function()
             if not allowed() then return end
             finishEdits(row)
             table.remove(editor.models,row.index)
@@ -1429,7 +1431,7 @@ local function BuildExtraEditor(panel,L,onResize)
         end)
         row.status=label(row,"",24,-34,width-24,"text")
         row:EnableMouse(true)
-        AttachHoverTooltip(row,"条目详情",function() return {row.status:GetText(),row.model.raw} end)
+        AttachHoverTooltip(row,T["条目详情"],function() return {row.status:GetText(),row.model.raw} end)
         if ns.UI.StyleOptions then ns.UI.StyleOptions(row) end
         function row:PaintStatus()
             local p=ns.UI.palette
@@ -1471,17 +1473,17 @@ local function BuildExtraEditor(panel,L,onResize)
             row.up:SetEnabled(i>1);row.down:SetEnabled(i<#self.models)
             local status
             row.statusMode="empty"
-            if model.kind=="comment" then status="注释 · 不生成按钮"
+            if model.kind=="comment" then status=T["注释 · 不生成按钮"]
             elseif TrimExtra(model.value)=="" then
-                status=model.kind=="action" and "请选择快捷动作" or "待填写名称 / ID"
+                status=model.kind=="action" and T["请选择快捷动作"] or T["待填写名称 / ID"]
             else
                 local good,entry=pcall(ParseExtraLine,model.raw)
                 if good and entry then
                     ok=ok+1;row.statusMode="ready"
-                    status="已识别 · " .. (KIND_LABEL[entry.kind] or "") .. " · " .. (entry.name or tostring(entry.id))
+                    status=T["已识别 · "] .. (KIND_LABEL[entry.kind] or "") .. " · " .. (entry.name or tostring(entry.id))
                 else
                     fail=fail+1;row.statusMode="error"
-                    status="未识别 · 请核对名称 / ID；数据就绪后自动重试"
+                    status=T["未识别 · 请核对名称 / ID；数据就绪后自动重试"]
                 end
             end
             row.status:SetText(status);row:PaintStatus()
@@ -1489,12 +1491,12 @@ local function BuildExtraEditor(panel,L,onResize)
         for i=#self.models+1,#self.rows do self.rows[i]:Hide() end
         diagWidgets.cfgBox=self.rows[1] and self.rows[1].value
         local cfg=DB().extra
-        local state=not ns.IsModuleEnabled(MODULE_ID) and "模块未启用"
-            or not DB().button.enabled and "主按钮未显示"
-            or not cfg.enabled and "扩展按钮未启用"
-            or cfg.collapsed and "扩展条已收起" or "扩展条已启用"
-        if InCombatLockdown() and pendingRebuild then state="安全按钮等待脱战更新" end
-        self.summary:SetText(("已识别 %d 条，未识别 %d 条 · %s"):format(ok,fail,state))
+        local state=not ns.IsModuleEnabled(MODULE_ID) and T["模块未启用"]
+            or not DB().button.enabled and T["主按钮未显示"]
+            or not cfg.enabled and T["扩展按钮未启用"]
+            or cfg.collapsed and T["扩展条已收起"] or T["扩展条已启用"]
+        if InCombatLockdown() and pendingRebuild then state=T["安全按钮等待脱战更新"] end
+        self.summary:SetText((T["已识别 %d 条，未识别 %d 条 · %s"]):format(ok,fail,state))
         local bottom=rowsTop-#self.models*58
         self.addBottom:ClearAllPoints();self.addBottom:SetPoint("TOPLEFT",0,bottom)
         self.summary:ClearAllPoints();self.summary:SetPoint("TOPLEFT",0,bottom-34)
@@ -1517,22 +1519,22 @@ local function MountStatus(cat)
     if stored then
         local id = ResolveStoredMount(stored)
         local name = id and MountName(id)
-        return name and ("|cff00ff88" .. name .. "|r")
-            or ("|cffff6060未匹配到已收藏的坐骑：" .. tostring(stored) .. "|r")
+        if name then return name, "success" end
+        return T["未匹配到已收藏的坐骑："] .. tostring(stored), "danger"
     end
     local auto = ResolveMount(cat)
-    if auto then return "|cffaaaaaa自动：" .. (MountName(auto) or ("#" .. auto)) .. "|r" end
-    return "|cffaaaaaa" .. (cat == "fly" and "随机收藏坐骑" or "未设置（没有合适的自动坐骑）") .. "|r"
+    if auto then return T["自动："] .. (MountName(auto) or ("#" .. auto)), "muted" end
+    return cat == "fly" and T["随机收藏坐骑"] or T["未设置（没有合适的自动坐骑）"], "muted"
 end
 
 local function BuildOptions(panel,m,L)
-    L:Title("快捷按钮")
-    L:Text("坐骑和按键集中设置；扩展条的内容与布局放在一起。",true)
+    L:Title(T["快捷按钮"])
+    L:Text(T["坐骑和按键集中设置；扩展条的内容与布局放在一起。"],true)
     m.mountRows = {}
     m.optionTabs=ns.UI.OptionTabs(panel,L,{
-        {name="坐骑与按键",width=150,build=function(panel,L)
-            L:Section("坐骑与点击组合键")
-            L:Text("按键重复时自动交换；Alt+右键打开设置，中键收起扩展条。", true)
+        {name=T["坐骑与按键"],width=150,build=function(panel,L)
+            L:Section(T["坐骑与点击组合键"])
+            L:Text(T["按键重复时自动交换；Alt+右键打开设置，中键收起扩展条。"], true)
             L:step(4)
             -- 同一平面五行；复用通用控件的皮肤、输入提交与同步，避免嵌套页签。
             local left, top = L.indent, L.y
@@ -1547,8 +1549,8 @@ local function BuildOptions(panel,m,L)
                 fs:SetSize(w,18);fs:SetJustifyH("LEFT");fs:SetText(text)
                 if ns.UI.StyleText then ns.UI.StyleText(fs,"muted") end
             end
-            heading("用途",left,48);heading("点击组合键",keyX,178)
-            heading("坐骑名称 / mountID（留空自动）",nameX,available-242)
+            heading(T["用途"],left,48);heading(T["点击组合键"],keyX,178)
+            heading(T["坐骑名称 / mountID（留空自动）"],nameX,available-242)
             L.y=top-24
             for _, category in ipairs(CATS) do
                 local cat=category
@@ -1571,16 +1573,16 @@ local function BuildOptions(panel,m,L)
                         local t=(v or ""):gsub("^%s+",""):gsub("%s+$","")
                         DB().mounts[cat]=(t~="") and (tonumber(t) or t) or nil
                     end, function() L:SyncAll();Refresh() end, true)
-                AttachHoverTooltip(row.mount,CAT_LABEL[cat] .. "坐骑",function()
-                    return {MountStatus(cat), "填写收藏中的完整名称或 mountID；回车/失焦保存，Esc 取消。骑上目标后点「抓取」。",
-                        "清除只清坐骑，不改按键；飞行留空用随机收藏，其余用途自动匹配，没有匹配则不召唤。"}
+                AttachHoverTooltip(row.mount,CAT_LABEL[cat] .. T["坐骑"],function()
+                    return {MountStatus(cat), T["填写收藏中的完整名称或 mountID；回车/失焦保存，Esc 取消。骑上目标后点「抓取」。"],
+                        T["清除只清坐骑，不改按键；飞行留空用随机收藏，其余用途自动匹配，没有匹配则不召唤。"]}
                 end)
                 L.indent=captureX;L.y=y-2
-                row.capture=L:Button(70,"抓取",function()
+                row.capture=L:Button(70,T["抓取"],function()
                     if CaptureCurrent(cat) then L:SyncAll();Refresh() end
                 end)
                 L.indent=clearX;L.y=y-2
-                row.clear=L:Button(48,"清除",function()
+                row.clear=L:Button(48,T["清除"],function()
                     DB().mounts[cat]=nil;L:SyncAll();Refresh()
                 end)
                 L.indent=keyX;L.y=y-34
@@ -1592,45 +1594,45 @@ local function BuildOptions(panel,m,L)
                 row.status:SetWordWrap(false)
                 L.indent=left;L.y=y-54
             end
-            L:Section("主按钮")
+            L:Section(T["主按钮"])
             L:Row({
-                function(c) c:Check("显示主按钮", function() return DB().button.enabled end,
+                function(c) c:Check(T["显示主按钮"], function() return DB().button.enabled end,
                     function(v) DB().button.enabled=v end, Refresh) end,
-                function(c) c:Check("锁定位置（Alt/Ctrl+左键仍可拖动）", function() return LayoutDB().locked end,
+                function(c) c:Check(T["锁定位置（Alt/Ctrl+左键仍可拖动）"], function() return LayoutDB().locked end,
                     function(v) LayoutDB().locked=v end, Refresh) end,
             }, 280)
             L:Row({
-                function(c) c:Slider("BaimiaoQuickMountScaleSlider", "整体缩放（%）", 50, 200, 5,
+                function(c) c:Slider("BaimiaoQuickMountScaleSlider", T["整体缩放（%）"], 50, 200, 5,
                     function() return (DB().button.scale or 1)*100 end,
                     function(v) DB().button.scale=v/100 end, Refresh) end,
                 function(c)
-                    m.resetMountBindings = c:Button(150, "恢复默认按键", function()
+                    m.resetMountBindings = c:Button(150, T["恢复默认按键"], function()
                         DB().bindings = {}
                         L:SyncAll(); Refresh()
                     end)
                 end,
             }, 280)
         end},
-        {name="扩展按钮",width=150,build=function(panel,L,onResize)
-            L:Section("扩展条布局")
+        {name=T["扩展按钮"],width=150,build=function(panel,L,onResize)
+            L:Section(T["扩展条布局"])
             L:Row({
-                function(c) c:Check("显示扩展按钮",function() return DB().extra.enabled end,
+                function(c) c:Check(T["显示扩展按钮"],function() return DB().extra.enabled end,
                     function(v) DB().extra.enabled=v end,Refresh) end,
-                function(c) c:Check("收起扩展条（中键或悬停控制钮切换）",function() return DB().extra.collapsed end,
+                function(c) c:Check(T["收起扩展条（中键或悬停控制钮切换）"],function() return DB().extra.collapsed end,
                     function(v) DB().extra.collapsed=v end,Refresh) end,
             },280)
             L:Row({
-                function(c) c:Dropdown(230,"生长方向：",ns.UI.ListFrom(
-                    {"RIGHT","LEFT","UP","DOWN"},{RIGHT="向右（默认）",LEFT="向左",UP="向上",DOWN="向下"}),
+                function(c) c:Dropdown(230,T["生长方向："],ns.UI.ListFrom(
+                    {"RIGHT","LEFT","UP","DOWN"},{RIGHT=T["向右（默认）"],LEFT=T["向左"],UP=T["向上"],DOWN=T["向下"]}),
                     function() return DB().extra.grow or "RIGHT" end,
                     function(v) DB().extra.grow=v end,Refresh) end,
-                function(c) c:Check("按钮下方显示短名",function() return DB().extra.showLabels~=false end,
+                function(c) c:Check(T["按钮下方显示短名"],function() return DB().extra.showLabels~=false end,
                     function(v) DB().extra.showLabels=v end,Refresh) end,
             },280)
-            L:Slider("BaimiaoQuickMountLabelCharsSlider","短名字数上限",2,6,1,
+            L:Slider("BaimiaoQuickMountLabelCharsSlider",T["短名字数上限"],2,6,1,
                 function() return tonumber(DB().extra.labelChars) or DEFAULT_LABEL_CHARS end,
                 function(v) DB().extra.labelChars=v end,Refresh)
-            L:Section("扩展内容 · 逐条编辑")
+            L:Section(T["扩展内容 · 逐条编辑"])
             m.extraEditor=BuildExtraEditor(panel,L,onResize)
 
         end},
@@ -1655,16 +1657,16 @@ local function SetupSlash()
             CaptureCurrent(arg)
         elseif cmd == "clear" and arg and CAT_LABEL[arg] then
             DB().mounts[arg] = nil
-            ns.Print("快捷按钮：已清除" .. CAT_LABEL[arg] .. "坐骑。")
+            ns.Print(T["快捷按钮：已清除"] .. CAT_LABEL[arg] .. T["坐骑。"])
         elseif cmd == "check" then
             CheckExtraConfig()   -- 逐行体检扩展按钮配置
         elseif cmd == "collapse" or cmd == "fold" or cmd == "收起" then
-            SetCollapsed(true); ns.Print(InCombatLockdown() and "快捷按钮：已请求收起，脱战后生效。" or "快捷按钮：已收起扩展按钮。")
-        elseif cmd == "expand" or cmd == "unfold" or cmd == "展开" then
-            SetCollapsed(false); ns.Print(InCombatLockdown() and "快捷按钮：已请求展开，脱战后生效。" or "快捷按钮：已展开扩展按钮。")
+            SetCollapsed(true); ns.Print(InCombatLockdown() and T["快捷按钮：已请求收起，脱战后生效。"] or T["快捷按钮：已收起扩展按钮。"])
+        elseif cmd == "expand" or cmd == "unfold" or cmd == "展开" or cmd == "展開" then
+            SetCollapsed(false); ns.Print(InCombatLockdown() and T["快捷按钮：已请求展开，脱战后生效。"] or T["快捷按钮：已展开扩展按钮。"])
         elseif cmd == "toggle" then
             SetCollapsed(not DB().extra.collapsed)
-            ns.Print("快捷按钮：" .. (InCombatLockdown() and "脱战后应用：" or "扩展按钮已") .. (DB().extra.collapsed and "收起" or "展开") .. "。")
+            ns.Print(T["快捷按钮："] .. (InCombatLockdown() and T["脱战后应用："] or T["扩展按钮已"]) .. (DB().extra.collapsed and T["收起"] or T["展开"]) .. "。")
         elseif cmd == "help" then
             PrintExtraHelp()     -- 扩展按钮完整说明
         elseif cmd == "diag" then
@@ -1681,8 +1683,8 @@ end
 
 ns.RegisterModule({
     id = MODULE_ID,
-    name = "快捷按钮",
-    desc = "一键快捷：一个按钮按自定义点击组合键召唤飞行/修理/拍卖行/载人/水下坐骑（坐骑可抓取或直接填名字）；旁边还能长出技能 / 玩具 / 物品 / 小退·退组·重载等自定义按钮。",
+    name = T["快捷按钮"],
+    desc = T["一键快捷：一个按钮按自定义点击组合键召唤飞行/修理/拍卖行/载人/水下坐骑（坐骑可抓取或直接填名字）；旁边还能长出技能 / 玩具 / 物品 / 小退·退组·重载等自定义按钮。"],
     defaults = defaults,
     OnEnable = function()
         RebuildMountCache()  -- 登录时建一次坐骑缓存，之后按需重建

@@ -1,5 +1,6 @@
 -- Small, user-triggered menu actions. No automatic invitations or menu replacement.
 local ADDON, ns = ...
+local T = ns.L
 local ID="smalltools"
 local defaults={guildInvite=true,multiInvite=true,copyName=true}
 local function DB() return ns.GetDB(ID,defaults) end
@@ -98,7 +99,7 @@ local function unitTarget(context,tag,copy)
     if not public(context.isMobile) or context.isMobile==true then return end
     return fullName(context.name,context.server)
 end
-local function feedback() ns.Print("目标状态或邀请权限已变化，请重新打开右键菜单。") end
+local function feedback() ns.Print(T["目标状态或邀请权限已变化，请重新打开右键菜单。"]) end
 local function inviteParty(account,expected)
     if not enabled("multiInvite") then return end
     local entry=findCharacter(account,expected)
@@ -135,7 +136,7 @@ local function copyName(name)
         f:SetBackdropColor(.055,.065,.075,.98);f:SetBackdropBorderColor(0,.65,.5,1)
         local title=f:CreateFontString(nil,"ARTWORK","GameFontNormal")
         ns.UI.RegisterRuntimeFont(title)
-        title:SetPoint("TOPLEFT",16,-14);title:SetText("复制角色名 · Ctrl+C 复制，Esc 关闭")
+        title:SetPoint("TOPLEFT",16,-14);title:SetText(T["复制角色名 · Ctrl+C 复制，Esc 关闭"])
         local edit=CreateFrame("EditBox",nil,f,"InputBoxTemplate")
         ns.UI.RegisterRuntimeFont(edit)
         edit:SetSize(342,28);edit:SetPoint("TOPLEFT",20,-48)
@@ -162,9 +163,9 @@ local function modify(tag,_,root,context)
             divider()
             if #entries==1 then
                 local name=entries[1].name
-                root:CreateButton("复制角色名",function()copyName(name)end)
+                root:CreateButton(T["复制角色名"],function()copyName(name)end)
             else
-                local menu=root:CreateButton("复制角色名")
+                local menu=root:CreateButton(T["复制角色名"])
                 for _,entry in ipairs(entries) do
                     local name=entry.name
                     menu:CreateButton(name,function()copyName(name)end)
@@ -172,12 +173,12 @@ local function modify(tag,_,root,context)
             end
         elseif not bnet then
             local name=unitTarget(context,tag,true)
-            if name then divider();root:CreateButton("复制角色名",function()copyName(name)end)end
+            if name then divider();root:CreateButton(T["复制角色名"],function()copyName(name)end)end
         end
     end
     if enabled("multiInvite") and account and #entries>1 then
         divider()
-        local menu=root:CreateButton("选择角色邀请")
+        local menu=root:CreateButton(T["选择角色邀请"])
         for _,entry in ipairs(entries) do
             local target=entry
             local button=menu:CreateButton(target.name,function() inviteParty(account,target) end)
@@ -192,9 +193,9 @@ local function modify(tag,_,root,context)
         divider()
         if #entries==1 then
             local target=eligible[1]
-            root:CreateButton("公会邀请",function() inviteGuild(target.name,nil,nil,account,target) end)
+            root:CreateButton(T["公会邀请"],function() inviteGuild(target.name,nil,nil,account,target) end)
         else
-            local menu=root:CreateButton("公会邀请")
+            local menu=root:CreateButton(T["公会邀请"])
             for _,entry in ipairs(eligible) do
                 local target=entry
                 menu:CreateButton(target.name,function() inviteGuild(target.name,nil,nil,account,target) end)
@@ -204,7 +205,7 @@ local function modify(tag,_,root,context)
         local name,unit,guid=unitTarget(context,tag)
         if not canGuild(name,unit) then return end
         divider()
-        root:CreateButton("公会邀请",function() inviteGuild(name,unit,guid,nil,nil,context,tag) end)
+        root:CreateButton(T["公会邀请"],function() inviteGuild(name,unit,guid,nil,nil,context,tag) end)
     end
 end
 local tags={"PLAYER","TARGET","FOCUS","PARTY","RAID_PLAYER","RAID","FRIEND","BN_FRIEND",
@@ -232,20 +233,20 @@ local function stop()
     if copyDialog then copyDialog:Hide()end
 end
 local function BuildOptions(_,m,L)
-    L:Title("小工具集合")
-    L:Section("右键菜单")
+    L:Title(T["小工具集合"])
+    L:Section(T["右键菜单"])
     L:Row({
-        function(cell) cell:Check("公会邀请",function()return DB().guildInvite end,function(v)DB().guildInvite=v end) end,
-        function(cell) cell:Check("多角色在线：选择角色邀请组队",function()return DB().multiInvite end,function(v)DB().multiInvite=v end) end,
+        function(cell) cell:Check(T["公会邀请"],function()return DB().guildInvite end,function(v)DB().guildInvite=v end) end,
+        function(cell) cell:Check(T["多角色在线：选择角色邀请组队"],function()return DB().multiInvite end,function(v)DB().multiInvite=v end) end,
     }, 260)
-    L:Check("复制角色名（名字-服务器）",function()return DB().copyName end,function(v)
+    L:Check(T["复制角色名（名字-服务器）"],function()return DB().copyName end,function(v)
         DB().copyName=v;if not v and copyDialog then copyDialog:Hide()end
     end)
     if ns.SmallToolsExtras then ns.SmallToolsExtras.BuildOptions(L)end
     if ns.MarkerAssist then ns.MarkerAssist.BuildOptions(L)end
 end
 events:SetScript("OnEvent",function() if ns.IsModuleEnabled(ID) then register() end end)
-ns.RegisterModule({id=ID,name="小工具集合",desc="右键邀请与复制、进本与排队提醒、交易回执、标记与倒数。",defaults=defaults,
+ns.RegisterModule({id=ID,name=T["小工具集合"],desc=T["右键邀请与复制、进本与排队提醒、交易回执、标记与倒数。"],defaults=defaults,
     BuildOptions=BuildOptions,OnEnable=start,
     OnDisable=stop,
     OnToggle=function(_,on) if on then start() end end})

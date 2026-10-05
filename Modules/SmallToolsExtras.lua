@@ -1,6 +1,7 @@
 -- Event-driven, local-only conveniences owned by SmallTools. No invitations,
 -- queue acceptance, protected actions, chat-channel sends or persistent history.
 local ADDON,ns=...
+local T = ns.L
 local M={};ns.SmallToolsExtras=M
 local defaults={instanceInfo=true,queueReady=true,queueSound=true,tradeReceipt=true,
     instanceHoldSeconds=5,instanceFadeSeconds=1,queueHoldSeconds=5,queueFadeSeconds=1}
@@ -97,11 +98,11 @@ end
 local function instance()
     local name,kind,difficultyID,difficultyName,_,_,_,id=read(GetInstanceInfo)
     if (kind~="party" and kind~="raid") or not number(id) or not number(difficultyID) then return end
-    return kind..":"..id..":"..difficultyID,text(name) or "副本",text(difficultyName) or "未知难度"
+    return kind..":"..id..":"..difficultyID,text(name) or T["副本"],text(difficultyName) or T["未知难度"]
 end
 local function lootSpec()
     local id=number(read(GetLootSpecialization))
-    if not id then return "未知"end
+    if not id then return T["未知"]end
     local current=id==0
     local name,ignored
     if current then
@@ -110,20 +111,20 @@ local function lootSpec()
     else
         ignored,name=read(GetSpecializationInfoByID,id)
     end
-    return (text(name) or "未知")..(current and "（当前）" or "")
+    return (text(name) or T["未知"])..(current and T["（当前）"] or "")
 end
 local function durability()
     local lowest
     for slot=1,19 do
         local t=values(GetInventoryItemDurability,slot)
-        if not t then return "未知"end
+        if not t then return T["未知"]end
         local now,max=number(t[1]),number(t[2])
         if now and max and max>0 then
             local percent=math.min(100,math.floor(now/max*100))
             lowest=lowest and math.min(lowest,percent) or percent
         end
     end
-    if not lowest then return "无耐久装备"end
+    if not lowest then return T["无耐久装备"]end
     local value=lowest.."%"
     if lowest<=30 then value="|cffff6655"..value.."|r"end
     return value
@@ -133,7 +134,7 @@ local function displayInstance()
     if read(InCombatLockdown)==true then return end
     local key,name,difficulty=instance()
     if key==pendingInstance then
-        toast("instanceInfo","|cff0cd29f"..name.." · "..difficulty.."|r\n拾取专精："..lootSpec().."  |  最低耐久："..durability())
+        toast("instanceInfo","|cff0cd29f"..name.." · "..difficulty..T["|r\n拾取专精："]..lootSpec()..T["  |  最低耐久："]..durability())
     end
     pendingInstance=nil
 end
@@ -154,7 +155,7 @@ local function enteredWorld(_,reloading)
 end
 
 local function queueNotice(message)
-    toast("queueReady","|cff0cd29f排队已就绪|r\n"..message.."，请在游戏原生窗口中确认。")
+    toast("queueReady",T["|cff0cd29f排队已就绪|r\n"]..message..T["，请在游戏原生窗口中确认。"])
     if DB().queueSound then
         -- No force-play flag and no CVar writes: respects master/background audio.
         read(PlaySound,(SOUNDKIT and SOUNDKIT.READY_CHECK) or 8960,"Master")
@@ -165,7 +166,7 @@ local function proposal()
     -- Silent proposals and already-answered prompts require no user action.
     if not data or data[1]~=true or data[8]==true or data[15]==true then return end
     if not lfgReady then
-        lfgReady=true;queueNotice(text(data[5]) or "地下城 / 团队查找器")
+        lfgReady=true;queueNotice(text(data[5]) or T["地下城 / 团队查找器"])
     end
 end
 local function battlefield(index)
@@ -174,7 +175,7 @@ local function battlefield(index)
     local status,name=read(GetBattlefieldStatus,index)
     if status=="confirm" then
         if not pvpReady[index] then
-            pvpReady[index]=true;queueNotice(text(name) or "战场 / 竞技场")
+            pvpReady[index]=true;queueNotice(text(name) or T["战场 / 竞技场"])
         end
     elseif status then pvpReady[index]=nil end
 end
@@ -182,24 +183,24 @@ end
 local function partnerName()
     local name,realm=read(UnitFullName,"NPC")
     name=text(name);realm=text(realm)
-    if not name then return "未知角色"end
+    if not name then return T["未知角色"]end
     if name:find("-",1,true) then return name end
     realm=realm or text(read(GetNormalizedRealmName))
     return realm and (name.."-"..realm:gsub("%s","")) or name
 end
 local function money(amount)
     amount=number(amount)
-    if not amount then return "金币未知"end
+    if not amount then return T["金币未知"]end
     local gold=math.floor(amount/10000)
     local silver=math.floor(amount/100)%100
     local copper=amount%100
-    return gold.."金"..silver.."银"..copper.."铜"
+    return gold..T["金"]..silver..T["银"]..copper..T["铜"]
 end
 local function offer(infoFn,linkFn,moneyFn,enchantIndex)
     local parts={money(read(moneyFn))}
     for slot=1,6 do
         local info=values(infoFn,slot)
-        if not info then parts[#parts+1]="物品信息未知";break end
+        if not info then parts[#parts+1]=T["物品信息未知"];break end
         local name=text(info[1])
         if name then
             local link=text(read(linkFn,slot)) or name
@@ -236,9 +237,9 @@ local function tradeComplete(message)
     local trade=activeTrade or pendingTrade
     activeTrade=nil;pendingTrade=nil
     if not trade then return end
-    local lines={"与 "..trade.partner.." 的交易已完成", "给出："..(trade.given or "信息未知"),"收到："..(trade.received or "信息未知")}
-    if trade.givenEnchant then lines[#lines+1]="提供附魔："..trade.givenEnchant end
-    if trade.receivedEnchant then lines[#lines+1]="收到附魔："..trade.receivedEnchant end
+    local lines={T["与 "]..trade.partner..T[" 的交易已完成"], T["给出："]..(trade.given or T["信息未知"]),T["收到："]..(trade.received or T["信息未知"])}
+    if trade.givenEnchant then lines[#lines+1]=T["提供附魔："]..trade.givenEnchant end
+    if trade.receivedEnchant then lines[#lines+1]=T["收到附魔："]..trade.receivedEnchant end
     ns.Print(table.concat(lines,"\n"))
 end
 
@@ -272,9 +273,9 @@ function M.BuildOptions(L)
             cell:Check(label,function()return DB()[key]end,function(v)DB()[key]=v;refresh()end)
         end
     end
-    L:Section("轻量提醒与回执")
-    L:Row({check("进本信息小条","instanceInfo"),check("排队就绪提醒","queueReady")},240)
-    L:Row({check("排队提示音（遵循游戏声音设置）","queueSound"),check("交易完成回执（仅自己可见）","tradeReceipt")},240)
+    L:Section(T["轻量提醒与回执"])
+    L:Row({check(T["进本信息小条"],"instanceInfo"),check(T["排队就绪提醒"],"queueReady")},240)
+    L:Row({check(T["排队提示音（遵循游戏声音设置）"],"queueSound"),check(T["交易完成回执（仅自己可见）"],"tradeReceipt")},240)
     local function timing(label,key)
         return function(cell)
             local limits=timingLimits[key]
@@ -282,13 +283,13 @@ function M.BuildOptions(L)
                 function()return seconds(key)end,function(v)DB()[key]=v end)
         end
     end
-    L:Row({timing("进本停留时间（秒）","instanceHoldSeconds"),timing("进本渐隐时间（秒）","instanceFadeSeconds")},240)
-    L:Row({timing("排队停留时间（秒）","queueHoldSeconds"),timing("排队渐隐时间（秒）","queueFadeSeconds")},240)
-    L:Text("仅显示文字，无背景和边框。停留后开始渐隐；渐隐设为 0 时直接隐藏，新设置从下次提醒或预览生效。交易回执仅自己可见，不保存历史、不发频道。",true)
-    L:Row({function(cell)cell:Button(150,"预览进本小条",function()
-        if enabled("instanceInfo") then toast("instanceInfo","|cff0cd29f进本信息 · 示例（非当前状态）|r\n史诗难度  |  拾取专精：惩戒  |  最低耐久：|cffff665528%|r")end
-    end)end,function(cell)cell:Button(150,"预览排队提醒",function()
-        if enabled("queueReady") then queueNotice("示例队列（非实际邀请）")end
+    L:Row({timing(T["进本停留时间（秒）"],"instanceHoldSeconds"),timing(T["进本渐隐时间（秒）"],"instanceFadeSeconds")},240)
+    L:Row({timing(T["排队停留时间（秒）"],"queueHoldSeconds"),timing(T["排队渐隐时间（秒）"],"queueFadeSeconds")},240)
+    L:Text(T["仅显示文字，无背景和边框。停留后开始渐隐；渐隐设为 0 时直接隐藏，新设置从下次提醒或预览生效。交易回执仅自己可见，不保存历史、不发频道。"],true)
+    L:Row({function(cell)cell:Button(150,T["预览进本小条"],function()
+        if enabled("instanceInfo") then toast("instanceInfo",T["|cff0cd29f进本信息 · 示例（非当前状态）|r\n史诗难度  |  拾取专精：惩戒  |  最低耐久：|cffff665528%|r"])end
+    end)end,function(cell)cell:Button(150,T["预览排队提醒"],function()
+        if enabled("queueReady") then queueNotice(T["示例队列（非实际邀请）"])end
     end)end},180)
 end
 events:SetScript("OnEvent",function(_,event,a,b)

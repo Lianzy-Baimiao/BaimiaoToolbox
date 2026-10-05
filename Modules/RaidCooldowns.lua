@@ -1,4 +1,5 @@
 local ADDON, ns = ...
+local T = ns.L
 
 --------------------------------------------------------------------------------
 -- 模块：嗜血 / 战复 监控
@@ -150,11 +151,11 @@ local function SampleLust()
     if not dead then
         local buff, buffExp = ReadAuras(LUST_SPELLS, now)
         if buff == 1 then
-            state.active, state.endsAt, state.source = true, buffExp, "嗜血增益"
+            state.active, state.endsAt, state.source = true, buffExp, T["嗜血增益"]
             -- 读得到实际结束时间时缩短备用窗口，不把推定计时延长到真实增益之后。
             if guessUntil and buffExp then guessUntil = math.min(guessUntil, buffExp) end
         elseif guessUntil then
-            state.active, state.endsAt, state.source = true, guessUntil, "新疲惫推定"
+            state.active, state.endsAt, state.source = true, guessUntil, T["新疲惫推定"]
             state.estimated = true
         end
     end
@@ -167,22 +168,22 @@ end
 
 local function GetLustDisplay(state)
     if state.active then
-        local text = "嗜血中"
+        local text = T["嗜血中"]
         if state.endsAt then
-            text = (state.estimated and "嗜血中 约%.0f秒" or "嗜血中 %.0f秒"):format(
+            text = (state.estimated and T["嗜血中 约%.0f秒"] or T["嗜血中 %.0f秒"]):format(
                 math.max(0, state.endsAt - GetTime()))
         end
         return text, { 1, 0.85, 0.1 }
     elseif state.sated == 1 then
         if state.satedExp then
             local left = math.max(0, state.satedExp - GetTime())
-            return ("冷却 %d:%02d"):format(math.floor(left / 60), math.floor(left % 60)), { 0.75, 0.75, 0.75 }
+            return (T["冷却 %d:%02d"]):format(math.floor(left / 60), math.floor(left % 60)), { 0.75, 0.75, 0.75 }
         end
-        return "冷却中", { 0.75, 0.75, 0.75 }
+        return T["冷却中"], { 0.75, 0.75, 0.75 }
     elseif state.sated == -1 then
-        return "状态暂不可读", { 0.75, 0.75, 0.75 }
+        return T["状态暂不可读"], { 0.75, 0.75, 0.75 }
     end
-    return "准备就绪", { 0.2, 1, 0.4 }
+    return T["准备就绪"], { 0.2, 1, 0.4 }
 end
 
 -- 各职业自带的战复法术（单人/小队时读自己这只）。
@@ -249,12 +250,12 @@ local function GetBrezState()
         -- 组着队却读不到共享池（例如野外小队）：显示「?」而不是「无」，
         -- 避免把"读不到"说成"没有战复"（模块里其它读不到的值也用「--/?」这种写法）。
         if IsInGroup() and not IsInRaid() then
-            return "战复：?", { 0.75, 0.75, 0.75 }
+            return T["战复：?"], { 0.75, 0.75, 0.75 }
         end
-        return "战复：无", { 0.75, 0.75, 0.75 }
+        return T["战复：无"], { 0.75, 0.75, 0.75 }
     end
 
-    local txt = "战复：" .. charges
+    local txt = T["战复："] .. charges
     if maxc and charges < maxc and start and dur and dur > 0 then
         local left = (start + dur) - GetTime()
         if left > 0 then
@@ -272,11 +273,11 @@ end
 local musicHandle
 local musicTicker    -- 循环播放的计时器
 local musicWantedLast = false
-local lastPlayResult, lastPlayAt = "尚未请求", nil
+local lastPlayResult, lastPlayAt = T["尚未请求"], nil
 
 local SOUND_CHANNELS = { "Master", "Music", "SFX", "Ambience", "Dialog" }
 local CHANNEL_LABEL = {
-    Master = "主声道", Music = "音乐", SFX = "音效", Ambience = "环境", Dialog = "对话",
+    Master = T["主声道"], Music = T["音乐"], SFX = T["音效"], Ambience = T["环境"], Dialog = T["对话"],
 }
 
 -- LibSharedMedia（可选）：读取其他插件注册的声音，不附带音乐文件。
@@ -294,7 +295,7 @@ local function SoundList()
             out[#out + 1] = { value = name, text = name }
         end
     end
-    out[#out + 1] = { value = "__custom__", text = "自定义路径…" }
+    out[#out + 1] = { value = "__custom__", text = T["自定义路径…"] }
     return out
 end
 
@@ -329,23 +330,23 @@ local function PlaySoundOnce(sound, report)
         file = ResolveSoundFile()
     end
     if not file then
-        if report then ns.Print("嗜血音乐：没选到有效的声音（自定义模式请填路径/fileDataID）。") end
-        return nil, "声音资源未找到"
+        if report then ns.Print(T["嗜血音乐：没选到有效的声音（自定义模式请填路径/fileDataID）。"]) end
+        return nil, T["声音资源未找到"]
     end
     local ok, willPlay, handle = pcall(PlaySoundFile, file, m.channel or "Master")
     if ok and willPlay then
         -- report=true 的调用点（点“试听”按钮）给一次确认；
         -- 悬停下拉试听传 false，避免滑一遍列表就刷屏。
         if report then
-            ns.Print("嗜血音乐：已请求播放（" .. (CHANNEL_LABEL[m.channel] or m.channel or "?") .. "）。")
+            ns.Print(T["嗜血音乐：已请求播放（"] .. (CHANNEL_LABEL[m.channel] or m.channel or "?") .. "）。")
         end
-        return handle, "客户端已接受请求（不代表一定可听见）"
+        return handle, T["客户端已接受请求（不代表一定可听见）"]
     end
     if report then
-        ns.Print("嗜血音乐：播放失败。自定义音频请放进插件目录用 " ..
-            "Interface\\AddOns\\...\\xxx.ogg 路径（游戏启动后临时丢进 Interface\\Music 的常读不到），或改用 fileDataID。")
+        ns.Print(T["嗜血音乐：播放失败。自定义音频请放进插件目录用 "] ..
+            T["Interface\\AddOns\\...\\xxx.ogg 路径（游戏启动后临时丢进 Interface\\Music 的常读不到），或改用 fileDataID。"])
     end
-    return nil, ok and "客户端拒绝播放" or "播放接口调用失败"
+    return nil, ok and T["客户端拒绝播放"] or T["播放接口调用失败"]
 end
 
 -- 停止：取消循环计时器 + 停当前音。
@@ -411,13 +412,13 @@ end
 local function ReportMusic()
     local m = DB().music
     local text = GetLustDisplay(lustState)
-    ns.Print("嗜血音乐：模块" .. ((ns.IsModuleEnabled(MODULE_ID) and DB().enabled) and "开" or "关") ..
-        " / 自动" .. (m.enabled and "开" or "关") .. " / " .. (CHANNEL_LABEL[m.channel] or "主声道") ..
-        "；当前：" .. text .. "。")
-    local trigger = lastTriggerSource and (lastTriggerSource .. ("（%.0f秒前）"):format(GetTime() - lastTriggerAt)) or "未检测到"
-    local result = lastPlayResult .. (lastPlayAt and ("（%.0f秒前）"):format(GetTime() - lastPlayAt) or "")
-    ns.Print("上次触发：" .. trigger .. "；自动播放：" .. result .. "。")
-    ns.Print("声音：" .. (m.sound or "未选择") .. "；资源" .. (ResolveSoundFile() and "已解析" or "未找到") .. "。")
+    ns.Print(T["嗜血音乐：模块"] .. ((ns.IsModuleEnabled(MODULE_ID) and DB().enabled) and T["开"] or T["关"]) ..
+        T[" / 自动"] .. (m.enabled and T["开"] or T["关"]) .. " / " .. (CHANNEL_LABEL[m.channel] or T["主声道"]) ..
+        T["；当前："] .. text .. "。")
+    local trigger = lastTriggerSource and (lastTriggerSource .. (T["（%.0f秒前）"]):format(GetTime() - lastTriggerAt)) or T["未检测到"]
+    local result = lastPlayResult .. (lastPlayAt and (T["（%.0f秒前）"]):format(GetTime() - lastPlayAt) or "")
+    ns.Print(T["上次触发："] .. trigger .. T["；自动播放："] .. result .. "。")
+    ns.Print(T["声音："] .. (m.sound or T["未选择"]) .. T["；资源"] .. (ResolveSoundFile() and T["已解析"] or T["未找到"]) .. "。")
     if GetCVar then
         local channel = m.channel or "Master"
         local function Setting(name)
@@ -426,8 +427,8 @@ local function ReportMusic()
             return tostring(value)
         end
         local enabled = channel == "Master" and "Sound_EnableAllSound" or "Sound_Enable" .. channel
-        ns.Print("声音设置：总开关=" .. Setting("Sound_EnableAllSound") .. " / 总音量=" .. Setting("Sound_MasterVolume") ..
-            " / 声道开关=" .. Setting(enabled) .. " / 声道音量=" .. Setting("Sound_" .. channel .. "Volume") .. "。")
+        ns.Print(T["声音设置：总开关="] .. Setting("Sound_EnableAllSound") .. T[" / 总音量="] .. Setting("Sound_MasterVolume") ..
+            T[" / 声道开关="] .. Setting(enabled) .. T[" / 声道音量="] .. Setting("Sound_" .. channel .. "Volume") .. "。")
     end
 end
 
@@ -539,10 +540,10 @@ local function CreateFrameOnce()
         legacy = DB(),                          -- 旧账号档布局自动迁移
         defaultPos = { point = "CENTER", relPoint = "CENTER", x = 0, y = 60 },
         tooltip = {
-            title = "嗜血 / 战复监控",
+            title = T["嗜血 / 战复监控"],
             lines = {
-                "Alt / Ctrl+左键：拖动摆位（锁定时也可）",
-                "Alt+右键：打开设置（命令 /raidcd 或 /bm raidcd）",
+                T["Alt / Ctrl+左键：拖动摆位（锁定时也可）"],
+                T["Alt+右键：打开设置（命令 /raidcd 或 /bm raidcd）"],
             },
         },
     })
@@ -606,72 +607,72 @@ end
 --------------------------------------------------------------------------------
 
 local function BuildOptions(panel,m,L)
-    L:Title("嗜血 / 战复监控")
-    L:Text("显示场景与音乐分开配置；试听只在本机播放。",true)
+    L:Title(T["嗜血 / 战复监控"])
+    L:Text(T["显示场景与音乐分开配置；试听只在本机播放。"],true)
     m.optionTabs=ns.UI.OptionTabs(panel,L,{
-        {name="显示与场景",width=150,build=function(panel,L)
-    L:Section("显示")
-    L:Check("显示嗜血行", function() return DB().showLust ~= false end,
+        {name=T["显示与场景"],width=150,build=function(panel,L)
+    L:Section(T["显示"])
+    L:Check(T["显示嗜血行"], function() return DB().showLust ~= false end,
         function(v) DB().showLust = v end, Refresh)
-    L:Check("显示战复行", function() return DB().showBrez end,
+    L:Check(T["显示战复行"], function() return DB().showBrez end,
         function(v) DB().showBrez = v end, Refresh)
-    L:Text("两行可分别开关；全部关闭时隐藏监控框，嗜血音乐仍由音乐页独立控制。",true)
-    L:Check("锁定位置（锁定后隐藏背景、不能拖动；Alt+左键仍可拖）",
+    L:Text(T["两行可分别开关；全部关闭时隐藏监控框，嗜血音乐仍由音乐页独立控制。"],true)
+    L:Check(T["锁定位置（锁定后隐藏背景、不能拖动；Alt+左键仍可拖）"],
         function() return LayoutDB().locked end,
         function(v) LayoutDB().locked = v end, Refresh)
 
-    L:Section("在哪些情况下显示")
-    L:Check("单人时显示", function() return DB().showSolo end,
+    L:Section(T["在哪些情况下显示"])
+    L:Check(T["单人时显示"], function() return DB().showSolo end,
         function(v) DB().showSolo = v end, Refresh)
-    L:Check("小队时显示", function() return DB().showParty end,
+    L:Check(T["小队时显示"], function() return DB().showParty end,
         function(v) DB().showParty = v end, Refresh)
-    L:Check("团队时显示", function() return DB().showRaid end,
+    L:Check(T["团队时显示"], function() return DB().showRaid end,
         function(v) DB().showRaid = v end, Refresh)
-    L:Slider("BaimiaoRaidCDFontSlider", "字号", 10, 40, 1,
+    L:Slider("BaimiaoRaidCDFontSlider", T["字号"], 10, 40, 1,
         function() return DB().fontSize or 16 end,
         function(v) DB().fontSize = v end, Refresh)
 
-    L:Text("提示：团队里读共享战复池；单人/小队里读你自己职业的战复（惩戒骑=代祷，不在CD就是1）。" ..
-        "自己职业没有战复时显示「战复：无」，不会误报 1 次。" ..
-        "嗜血判定已内置常见变体（嗜血/英勇/时间扭曲/亲龙之赐/原始狂暴）。" ..
-        "锁定后可用 Alt+右键 打开本设置。", true)
+    L:Text(T["提示：团队里读共享战复池；单人/小队里读你自己职业的战复（惩戒骑=代祷，不在CD就是1）。"] ..
+        T["自己职业没有战复时显示「战复：无」，不会误报 1 次。"] ..
+        T["嗜血判定已内置常见变体（嗜血/英勇/时间扭曲/亲龙之赐/原始狂暴）。"] ..
+        T["锁定后可用 Alt+右键 打开本设置。"], true)
         end},
-        {name="音乐与试听",width=150,build=function(panel,L)
-    L:Section("嗜血音乐")
-    L:Check("嗜血触发时播放音乐",
+        {name=T["音乐与试听"],width=150,build=function(panel,L)
+    L:Section(T["嗜血音乐"])
+    L:Check(T["嗜血触发时播放音乐"],
         function() return DB().music.enabled end,
         function(v) DB().music.enabled = v end)
     -- 声音下拉：悬停某项即试听（previewFn）。
-    L:Dropdown(300, "音乐：", SoundList,
+    L:Dropdown(300, T["音乐："], SoundList,
         function() return DB().music.sound end,
         function(v) DB().music.sound = v end,
         nil,
         function(v) PreviewMusic(v) end)
-    L:Dropdown(200, "声道：", ns.UI.ListFrom(SOUND_CHANNELS, CHANNEL_LABEL),
+    L:Dropdown(200, T["声道："], ns.UI.ListFrom(SOUND_CHANNELS, CHANNEL_LABEL),
         function() return DB().music.channel or "Master" end,
         function(v) DB().music.channel = v end)
-    L:Text("悬停音乐列表可试听；自定义路径和循环间隔在右侧页面设置。",true)
-    local tryBtn = L:Button(120, "试听", function() PreviewMusic(nil, true) end)
-    L:Button(120, "停止", function() StopLustMusic() end, true, tryBtn)
+    L:Text(T["悬停音乐列表可试听；自定义路径和循环间隔在右侧页面设置。"],true)
+    local tryBtn = L:Button(120, T["试听"], function() PreviewMusic(nil, true) end)
+    L:Button(120, T["停止"], function() StopLustMusic() end, true, tryBtn)
 
 
         end},
-        {name="循环与自定义",width=150,build=function(panel,L)
-    L:Section("高级音乐设置")
-    L:Check("嗜血持续期间循环播放",
+        {name=T["循环与自定义"],width=150,build=function(panel,L)
+    L:Section(T["高级音乐设置"])
+    L:Check(T["嗜血持续期间循环播放"],
         function() return DB().music.loop end,
         function(v) DB().music.loop = v end)
-    L:Slider("BaimiaoRaidCDLoopSlider", "循环间隔(秒)", 1, 30, 1,
+    L:Slider("BaimiaoRaidCDLoopSlider", T["循环间隔(秒)"], 1, 30, 1,
         function() return DB().music.loopInterval or 3 end,
         function(v) DB().music.loopInterval = v end)
-    L:Text("循环间隔建议设成你音频的实际长度，衔接最顺。悬停上面的音乐下拉项可直接试听。", true)
-    L:Text("声道对单次播放和循环播放都生效（循环用的是定时重播 PlaySoundFile）。", true)
-    L:Text("自定义路径 / fileDataID（音乐下拉选“自定义路径…”时用）：", true)
+    L:Text(T["循环间隔建议设成你音频的实际长度，衔接最顺。悬停上面的音乐下拉项可直接试听。"], true)
+    L:Text(T["声道对单次播放和循环播放都生效（循环用的是定时重播 PlaySoundFile）。"], true)
+    L:Text(T["自定义路径 / fileDataID（音乐下拉选“自定义路径…”时用）："], true)
     L:Box(460, 22, false,
         function() return DB().music.file end,
         function(v) DB().music.file = (v or ""):gsub("^%s+", ""):gsub("%s+$", "") end)
-    local tryBtn = L:Button(120, "试听", function() PreviewMusic(nil, true) end)
-    L:Button(120, "停止", function() StopLustMusic() end, true, tryBtn)
+    local tryBtn = L:Button(120, T["试听"], function() PreviewMusic(nil, true) end)
+    L:Button(120, T["停止"], function() StopLustMusic() end, true, tryBtn)
 
 
         end},
@@ -689,15 +690,15 @@ local function SetupSlash()
     SlashCmdList["BMRAIDCD"] = function(msg)
         local cmd = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
         if cmd == "lock" then
-            LayoutDB().locked = true; Refresh(); ns.Print("嗜血/战复监控：已锁定。")
+            LayoutDB().locked = true; Refresh(); ns.Print(T["嗜血/战复监控：已锁定。"])
         elseif cmd == "unlock" then
-            LayoutDB().locked = false; Refresh(); ns.Print("嗜血/战复监控：已解锁，可拖动。")
+            LayoutDB().locked = false; Refresh(); ns.Print(T["嗜血/战复监控：已解锁，可拖动。"])
         elseif cmd == "music" then
             ReportMusic()
         elseif cmd == "reset" then
             local d = LayoutDB()
             d.point, d.relPoint, d.x, d.y = "CENTER", "CENTER", 0, 60
-            Refresh(); ns.Print("嗜血/战复监控：位置已重置。")
+            Refresh(); ns.Print(T["嗜血/战复监控：位置已重置。"])
         else
             ns.OpenOptions(MODULE_ID)
         end
@@ -710,8 +711,8 @@ end
 
 ns.RegisterModule({
     id = MODULE_ID,
-    name = "嗜血/战复监控",
-    desc = "两行小图标常驻：嗜血准备就绪/倒计时、战复剩余次数，可选嗜血音乐。",
+    name = T["嗜血/战复监控"],
+    desc = T["两行小图标常驻：嗜血准备就绪/倒计时、战复剩余次数，可选嗜血音乐。"],
     defaults = defaults,
     OnEnable = function()
         CreateFrameOnce()

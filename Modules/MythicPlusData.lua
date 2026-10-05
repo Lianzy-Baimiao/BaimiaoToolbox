@@ -1,5 +1,6 @@
 -- Retail Mythic+ data adapter. No SavedVariables, UI, networking or addon dependency.
 local ADDON, ns = ...
+local T = ns.L
 local D = {}
 ns.MythicPlusData = D
 
@@ -76,26 +77,26 @@ function D.PortalID(mapID)
 end
 function D.Portal(mapID)
     local id=D.PortalID(mapID)
-    if not id then return nil,"未收录传送" end
-    if not D.Known(id) then return id,"未学会传送" end
-    if InCombatLockdown() then return id,"战斗中不可传送" end
+    if not id then return nil,T["未收录传送"] end
+    if not D.Known(id) then return id,T["未学会传送"] end
+    if InCombatLockdown() then return id,T["战斗中不可传送"] end
     local cd=call(C_Spell,"GetSpellCooldown",id)
     if type(cd)=="table" then
         local start,duration=D.Number(cd.startTime),D.Number(cd.duration)
-        if not start or not duration then return id,"冷却状态暂不可用" end
+        if not start or not duration then return id,T["冷却状态暂不可用"] end
         local remaining=math.max(0,start+duration-GetTime())
         if remaining>1.5 then
             local minutes=math.ceil(remaining/60)
-            return id,minutes>=60 and ("冷却 "..math.ceil(minutes/60).." 小时") or ("冷却 "..minutes.." 分钟")
+            return id,minutes>=60 and (T["冷却 "]..math.ceil(minutes/60)..T[" 小时"]) or (T["冷却 "]..minutes..T[" 分钟"])
         end
     else
-        return id,"冷却状态暂不可用"
+        return id,T["冷却状态暂不可用"]
     end
-    return id,"点击传送"
+    return id,T["点击传送"]
 end
 function D.Map(id)
     local name,_,limit,texture=call(C_ChallengeMode,"GetMapUIInfo",id)
-    return {id=id, name=type(name)=="string" and name or ("地下城 #"..id),
+    return {id=id, name=type(name)=="string" and name or (T["地下城 #"]..id),
         limit=D.Number(limit),texture=(public(texture) and texture) or 134400,
         best=0,score=0,count=0,weekly=0,timed=0}
 end
@@ -238,7 +239,7 @@ function D.Snapshot()
         local id=D.Number(a.id)
         if id then
             local name,description,texture=call(C_ChallengeMode,"GetAffixInfo",id)
-            result.affixes[#result.affixes+1]={id=id,name=name or ("词缀 #"..id),description=description,texture=texture or 134400}
+            result.affixes[#result.affixes+1]={id=id,name=name or (T["词缀 #"]..id),description=description,texture=texture or 134400}
         end
     end
     result.keyMap=D.Number(call(C_MythicPlus,"GetOwnedKeystoneChallengeMapID"))

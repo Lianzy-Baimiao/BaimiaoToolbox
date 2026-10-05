@@ -1,6 +1,7 @@
 -- Current party only. Public, self-reported keys; no inspection, persistent
 -- history or chat spam. Protocol adapters are independent of the four-row UI.
 local ADDON,ns=...
+local T = ns.L
 local K={};ns.PartyKeystones=K
 local frame=CreateFrame("Frame")
 local running,notify,allowed=false,nil,nil
@@ -155,7 +156,7 @@ local function receive(prefix,message,ch,sender)
     if prefix=="LRS" and not canDecode(row) then return end
     local kind,map,level=P.Read(prefix,message)
     if kind=="request" then announce(prefix)
-    elseif kind=="key" then store(row,map,level,"队友同步")end
+    elseif kind=="key" then store(row,map,level,T["队友同步"])end
 end
 function K.Snapshot()
     if not active() then return {} end
@@ -165,8 +166,8 @@ function K.Snapshot()
         local data=cache[row.guid]
         if data and GetTime()-data.time<=600 then
             item.mapID=data.mapID;item.level=data.level;item.source=data.source
-            item.status=data.mapID==0 and "无钥石" or nil
-        else item.status=row.online and "待同步" or "离线" end
+            item.status=data.mapID==0 and T["无钥石"] or nil
+        else item.status=row.online and T["待同步"] or T["离线"] end
         result[#result+1]=item
     end
     return result
@@ -196,7 +197,7 @@ frame:SetScript("OnEvent",function(_,event,...)
         if ch~=channel() then return end
         rebuild();local row=member(sender);if not row then return end
         local map,level=message:match("|Hkeystone:%d+:(%d+):(%d+):")
-        if map then store(row,map,level,"队友分享的钥石链接")end
+        if map then store(row,map,level,T["队友分享的钥石链接"])end
     elseif event=="PLAYER_LEAVING_WORLD" then cache={};decodeBudget={};changed()
     elseif event=="CHALLENGE_MODE_START" then cache={};changed()
     elseif event=="GROUP_ROSTER_UPDATE" then

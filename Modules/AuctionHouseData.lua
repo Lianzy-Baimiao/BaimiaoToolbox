@@ -1,5 +1,6 @@
 -- Pure validation and price planning. No API calls or purchase side effects.
 local _, ns = ...
+local T = ns.L
 local A = { MAX_ROWS=100, MAX_PLANS=12, MAX_QUANTITY=100000, MAX_MONEY=99999999999 }
 ns.AuctionHouse = A
 A.defaults = { showPanel=true, quickSearch=true, restock=true, selectedPlan=1, sessionBudget=0,
@@ -23,6 +24,18 @@ preset("公函",{245782,245784,245786,245788,245790,245792,245815,245817,245819,
 preset("常用",{272195,269586,248137,132514,219905,259085})
 preset("特殊",{188152,204370,124640,225592,191350})
 A.categoryOrder={"全部","收藏","合剂","药水","食物","武器油","宝石","附魔","公函","常用","特殊"}
+-- Category IDs are persisted in old favorites. Translate at presentation only;
+-- never run arbitrary user group names, searches or plan names through L.
+local categoryIDs={}
+for _,id in ipairs(A.categoryOrder)do categoryIDs[id]=true end
+function A.CategoryName(id)
+    return categoryIDs[id] and T[id] or id
+end
+function A.CategoryID(value)
+    if categoryIDs[value] then return value end
+    for _,id in ipairs(A.categoryOrder)do if T[id]==value then return id end end
+    return value
+end
 -- Concise effects verified against localized item tooltips (no fixed stat amounts).
 -- Lookup by ID so favorites retain details without migrating saved variables.
 local attributes={
@@ -98,8 +111,8 @@ function A.Gold(value)
     return math.floor(n*10000+0.5)
 end
 function A.Money(copper)
-    if not A.Number(copper) then return "未知" end
-    return string.format(copper%100==0 and "%.2f金" or "%.4f金",copper/10000)
+    if not A.Number(copper) then return T["未知"] end
+    return string.format(copper%100==0 and T["%.2f金"] or T["%.4f金"],copper/10000)
 end
 function A.Need(target,owned,pending)
     target=A.Integer(target,1,A.MAX_QUANTITY)
@@ -111,31 +124,31 @@ end
 -- Evaluate every required price tier, never use the cheapest/average price as a cap.
 -- Do not silently buy a partial quantity: the user reviews one complete quote.
 function A.PricePlan(tiers,quantity,cap)
-    if not A.Integer(quantity,1,A.MAX_QUANTITY) or not A.Integer(cap,0) then return nil,"限价无效" end
+    if not A.Integer(quantity,1,A.MAX_QUANTITY) or not A.Integer(cap,0) then return nil,T["限价无效"] end
     local remaining,total,highest=quantity,0,0
     local sorted={}
     for _,tier in ipairs(tiers) do
         local price=A.Integer(tier.unitPrice,1)
         local count=A.Integer(tier.quantity,0,A.MAX_QUANTITY*100)
-        if not price or not count then return nil,"报价数据未知" end
+        if not price or not count then return nil,T["报价数据未知"] end
         sorted[#sorted+1]={unitPrice=price,quantity=count}
     end
     table.sort(sorted,function(a,b)return a.unitPrice<b.unitPrice end)
     for _,tier in ipairs(sorted) do
         if remaining==0 then break end
         if tier.quantity>0 then
-            if cap>0 and tier.unitPrice>cap then return nil,"超出单价上限" end
+            if cap>0 and tier.unitPrice>cap then return nil,T["超出单价上限"] end
             local take=math.min(remaining,tier.quantity)
             total=total+take*tier.unitPrice;highest=tier.unitPrice;remaining=remaining-take
-            if total>A.MAX_MONEY then return nil,"总价超出安全范围" end
+            if total>A.MAX_MONEY then return nil,T["总价超出安全范围"] end
         end
     end
-    if remaining>0 then return nil,"在售数量不足" end
+    if remaining>0 then return nil,T["在售数量不足"] end
     return {quantity=quantity,total=total,highest=highest}
 end
 function A.DB()
     local d=ns.GetDB("auctionhouse",A.defaults)
-    if type(d.plans)~="table" or #d.plans==0 then d.plans={{name="日常补货",items={}}} end
+    if type(d.plans)~="table" or #d.plans==0 then d.plans={{name=T["日常补货"],items={}}} end
     if type(d.favorites)~="table" then d.favorites={} end
     -- Existing favorites, including the first prototype's eight entries, survive.
     d.favoritesSeeded=true

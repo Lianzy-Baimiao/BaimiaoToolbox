@@ -1,4 +1,5 @@
 local ADDON, ns = ...
+local T = ns.L
 
 --------------------------------------------------------------------------------
 -- 白描工具箱 · 框架
@@ -72,7 +73,7 @@ function ns.GetLayoutDB(moduleId, legacySrc)
 end
 
 local function P(msg)
-    print("|cff0cd29f白描工具箱|r: " .. msg)
+    print(T["|cff0cd29f白描工具箱|r: "] .. msg)
 end
 ns.Print = P
 
@@ -84,7 +85,7 @@ ns.Print = P
 --   OnDisable(m) （可选）模块被总开关关闭时调用，用来停 ticker / 摘事件
 --   BuildOptions(panel, m)  往设置子面板里放控件（可选）
 function ns.RegisterModule(def)
-    assert(def and def.id, "模块必须有 id")
+    assert(def and def.id, T["模块必须有 id"])
     ns.modules[def.id] = def
     ns.orderedModules[#ns.orderedModules + 1] = def
 end
@@ -107,11 +108,11 @@ function ns.SetModuleEnabled(id, on)
     -- 关闭时先走 OnDisable（停 ticker / 摘事件），再走 OnToggle 刷 UI。
     if not on and m.OnDisable then
         local ok, err = pcall(m.OnDisable, m)
-        if not ok then P(("模块 %s 停用时报错：%s"):format(id, tostring(err))) end
+        if not ok then P((T["模块 %s 停用时报错：%s"]):format(id, tostring(err))) end
     end
     if m.OnToggle then
         local ok, err = pcall(m.OnToggle, m, on and true or false)
-        if not ok then P(("模块 %s 切换时报错：%s"):format(id, tostring(err))) end
+        if not ok then P((T["模块 %s 切换时报错：%s"]):format(id, tostring(err))) end
     end
 end
 
@@ -140,12 +141,12 @@ end
 -- Explicit opt-in only: never mutate shared GameFont objects, Blizzard UI, or
 -- settings text. Keep each owned FontString/EditBox's font, size and other flags.
 local runtimeFonts = setmetatable({}, { __mode = "k" })
-local function runtimeFontFlags(flags)
+local function runtimeFontFlags(flags, outline)
     local out = {}
     for flag in string.gmatch(flags or "", "[^,%s]+") do
         if flag ~= "OUTLINE" and flag ~= "THICKOUTLINE" then out[#out + 1] = flag end
     end
-    if ns.UI.GetAppearanceDB().outline then out[#out + 1] = "OUTLINE" end
+    if outline then out[#out + 1] = "OUTLINE" end
     return table.concat(out, ",")
 end
 function ns.UI.SetRuntimeFont(font, path, size, flags)
@@ -154,12 +155,33 @@ function ns.UI.SetRuntimeFont(font, path, size, flags)
     local currentPath, currentSize, currentFlags = font:GetFont()
     path, size = path or currentPath, size or currentSize
     if path and size then
-        font:SetFont(path, size, runtimeFontFlags(flags or currentFlags))
+        local lightPanel = font._bmTextRole and not font._bmTextOnWorld
+            and ns.UI.palette and ns.UI.palette.isLight
+        font:SetFont(path, size, runtimeFontFlags(flags or currentFlags,
+            ns.UI.GetAppearanceDB().outline and not lightPanel))
+        if font._bmTextRole and font.SetShadowOffset then
+            if not font._bmPanelShadow then
+                local x, y = 0, 0
+                if font.GetShadowOffset then x, y = font:GetShadowOffset() end
+                font._bmPanelShadow = {x, y}
+            end
+            if lightPanel then font:SetShadowOffset(0, 0)
+            else font:SetShadowOffset(unpack(font._bmPanelShadow)) end
+        end
     end
     return font
 end
 function ns.UI.RegisterRuntimeFont(font)
     return ns.UI.SetRuntimeFont(font)
+end
+-- Theme-owned panel text is distinct from white text floating over the world or
+-- icons. Light panels suppress black outlines/shadows without changing the saved
+-- runtime-outline preference; settings text stays unoutlined in either theme.
+function ns.UI.RefreshTextFont(font)
+    if runtimeFonts[font] then return ns.UI.SetRuntimeFont(font) end
+    local path, size, flags = font:GetFont()
+    if path and size then font:SetFont(path, size, runtimeFontFlags(flags, false)) end
+    if font.SetShadowOffset then font:SetShadowOffset(0, 0) end
 end
 function ns.UI.RegisterRuntimeCooldown(cooldown)
     if cooldown and cooldown.GetCountdownFontString then
@@ -268,12 +290,12 @@ function ns.UI.CreateMovableFrame(opts)
     if opts.tooltip then
         f:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(opts.tooltip.title or "")
+            GameTooltip:AddLine(opts.tooltip.title or "", nil, nil, nil, true)
             for _, line in ipairs(opts.tooltip.lines or {}) do
-                GameTooltip:AddLine(line, 0.6, 0.9, 1)
+                GameTooltip:AddLine(line, 0.6, 0.9, 1, true)
             end
             if not f:IsLocked() and not opts.unlockDragOnly then
-                GameTooltip:AddLine("未锁定：按住左键拖动", 0.6, 0.9, 1)
+                GameTooltip:AddLine(T["未锁定：按住左键拖动"], 0.6, 0.9, 1, true)
             end
             GameTooltip:Show()
         end)
@@ -335,7 +357,14 @@ end
 
 local SKIN_BORDER = { 0.20, 0.28, 0.29, 1 }
 local SKIN_BORDER_HOVER = { 0.35, 0.75, 0.65, 1 }
-local SKIN_BORDER_FOCUS = { 0.35, 0.75, 0.65, 1 }
+local function SkinBorderColor(f)
+    local active = f._skinFocused or f._skinHovered
+    local p = ns.UI.palette
+    return p and (active and p.accent or p.border) or (active and SKIN_BORDER_HOVER or SKIN_BORDER)
+end
+local function PaintSkinBorder(f)
+    f:SetBackdropBorderColor(unpack(SkinBorderColor(f)))
+end
 
 local function SkinCardFrame(f, alpha)
     if not f.SetBackdrop then Mixin(f, BackdropTemplateMixin) end
@@ -345,19 +374,19 @@ local function SkinCardFrame(f, alpha)
     })
     local function paint()
         local p = ns.UI.palette
-        f:SetBackdropColor(unpack(p and p.card or {0.07, 0.10, 0.12, 1}))
-        f:SetBackdropBorderColor(unpack(p and p.border or SKIN_BORDER))
+        f:SetBackdropColor(unpack(p and (f._skinHovered and p.hover or p.card) or {0.07, 0.10, 0.12, 1}))
+        PaintSkinBorder(f)
     end
     if ns.UI.OnTheme then ns.UI.OnTheme(paint) else paint() end
 end
 local function SkinHoverBorder(f)
     f:HookScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(unpack(ns.UI.palette and ns.UI.palette.accent or SKIN_BORDER_HOVER))
+        self._skinHovered = true
+        PaintSkinBorder(self)
     end)
     f:HookScript("OnLeave", function(self)
-        if not self._skinFocused then
-            self:SetBackdropBorderColor(unpack(ns.UI.palette and ns.UI.palette.border or SKIN_BORDER))
-        end
+        self._skinHovered = nil
+        PaintSkinBorder(self)
     end)
 end
 local function SkinTextButton(b)
@@ -371,6 +400,7 @@ local function SkinTextButton(b)
         local path, size = fs:GetFont()
         if path then fs:SetFont(path, math.max(size or 12, 12), "") end
         fs:SetShadowOffset(0, 0)
+        if ns.UI.StyleText then ns.UI.StyleText(fs, "text") end
     end
     local function paint(self, hover)
         local p = ns.UI.palette
@@ -431,7 +461,7 @@ function ns.UI.NewLayout(panel)
             local ok, err = pcall(f)
             if not ok and not self._syncWarned then
                 self._syncWarned = true
-                ns.Print("|cffff4040某个设置控件刷新失败（其余控件已正常显示）：|r" .. tostring(err))
+                ns.Print(T["|cffff4040某个设置控件刷新失败（其余控件已正常显示）：|r"] .. tostring(err))
             end
         end
     end
@@ -641,14 +671,14 @@ function ns.UI.NewLayout(panel)
         -- 聚焦时边框亮成主题翠绿，失焦还原，明确“正在编辑哪个框”。
         eb:SetScript("OnEditFocusGained", function()
             box._skinFocused = true
-            box:SetBackdropBorderColor(unpack(SKIN_BORDER_FOCUS))
+            PaintSkinBorder(box)
         end)
 
         -- 右侧“保存”按钮 + “已保存”提示。让用户明确知道有没有生效。
         local saveBtn = CreateFrame("Button", nil, self.panel, "UIPanelButtonTemplate")
         saveBtn:SetSize(56, 22)
         saveBtn:SetPoint("LEFT", box, "RIGHT", 8, 0)
-        saveBtn:SetText("保存")
+        saveBtn:SetText(T["保存"])
         SkinTextButton(saveBtn)
         local flash = self.panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         flash:SetPoint("LEFT", saveBtn, "RIGHT", 6, 0)
@@ -659,13 +689,17 @@ function ns.UI.NewLayout(panel)
         local dirty = false
         local function markDirty()
             dirty = true
-            flash:SetText("|cffffd100未保存*|r")
+            flash:SetText(T["未保存*"])
+            if ns.UI.StyleText then ns.UI.StyleText(flash, "warning")
+            else flash:SetTextColor(1, 0.82, 0) end
         end
         local function commit()
             if InCombatLockdown() then return end
             setter(eb:GetText())
             dirty = false
-            flash:SetText("|cff20ff40已保存|r")
+            flash:SetText(T["已保存"])
+            if ns.UI.StyleText then ns.UI.StyleText(flash, "success")
+            else flash:SetTextColor(0.13, 1, 0.25) end
             C_Timer.After(1.5, function() if not dirty then flash:SetText("") end end)
             if onChange then onChange() end
         end
@@ -685,7 +719,8 @@ function ns.UI.NewLayout(panel)
             eb:Hide()
             valueFs:SetText(getter() or "")
             valueFs:Show()
-            box:SetBackdropBorderColor(unpack(SKIN_BORDER))
+            box._skinFocused = nil
+            PaintSkinBorder(box)
         end
         local function enterEdit()
             if box._editing then return end
@@ -695,7 +730,8 @@ function ns.UI.NewLayout(panel)
             eb:Show()
             eb:HighlightText()
             eb:SetFocus()
-            box:SetBackdropBorderColor(unpack(SKIN_BORDER_FOCUS))
+            box._skinFocused = true
+            PaintSkinBorder(box)
         end
 
         eb:SetScript("OnTextChanged", function(_, userInput)
@@ -710,7 +746,7 @@ function ns.UI.NewLayout(panel)
         eb:SetScript("OnEditFocusLost", function()
             box._skinFocused = nil
             if multi then
-                box:SetBackdropBorderColor(unpack(SKIN_BORDER))
+                PaintSkinBorder(box)
                 commit()
             else
                 exitEdit(true)
@@ -896,9 +932,24 @@ function ns.UI.NewLayout(panel)
         slider:SetScript("OnMouseWheel", function(_, delta) stepBy(delta * stepV) end)
         holder:SetScript("OnMouseWheel", function(_, delta) stepBy(delta * stepV) end)
 
-        -- 悬停轨道时拖块提亮，提示"这里可以拖"。
-        slider:SetScript("OnEnter", function() knobBg:SetColorTexture(unpack(KNOB_HOVER)) end)
-        slider:SetScript("OnLeave", function() knobBg:SetColorTexture(unpack(KNOB_COLOR)) end)
+        -- Light mode uses solid, restrained colors rather than the dark theme's
+        -- black translucent track and luminous green thumb.
+        local function paintSlider()
+            local p = ns.UI.palette
+            if p and p.isLight then
+                track:SetColorTexture(unpack(p.border))
+                fill:SetColorTexture(unpack(p.accent))
+                knobBg:SetColorTexture(unpack(slider._skinHovered and p.text or p.accent))
+            else
+                track:SetColorTexture(0, 0, 0, 0.55)
+                fill:SetColorTexture(0.05, 0.83, 0.62, 0.5)
+                knobBg:SetColorTexture(unpack(slider._skinHovered and KNOB_HOVER or KNOB_COLOR))
+            end
+            knobShine:SetShown(not (p and p.isLight))
+        end
+        if ns.UI.OnTheme then ns.UI.OnTheme(paintSlider) else paintSlider() end
+        slider:SetScript("OnEnter", function() slider._skinHovered=true; paintSlider() end)
+        slider:SetScript("OnLeave", function() slider._skinHovered=nil; paintSlider() end)
 
         -- 点击数值 → 编辑态；回车/失焦确认，Esc 取消。
         local editing = false
@@ -910,7 +961,8 @@ function ns.UI.NewLayout(panel)
             eb:Show()
             eb:HighlightText()
             eb:SetFocus()
-            ebHolder:SetBackdropBorderColor(unpack(SKIN_BORDER_FOCUS))
+            ebHolder._skinFocused = true
+            PaintSkinBorder(ebHolder)
         end
         local function exitEdit(apply)
             if InCombatLockdown() then apply = false end
@@ -923,7 +975,8 @@ function ns.UI.NewLayout(panel)
             updateVisual(slider:GetValue())
             eb:Hide()
             valueFs:Show()
-            ebHolder:SetBackdropBorderColor(unpack(SKIN_BORDER))
+            ebHolder._skinFocused = nil
+            PaintSkinBorder(ebHolder)
         end
 
         ebHolder:SetScript("OnMouseDown", function() enterEdit() end)
@@ -946,7 +999,7 @@ function ns.UI.NewLayout(panel)
             local ok, err = pcall(sync)
             if not ok and not syncWarned then
                 syncWarned = true
-                ns.Print("|cffff4040「" .. (label or "?") .. "」滑块取值失败：|r" .. tostring(err))
+                ns.Print("|cffff4040「" .. (label or "?") .. T["」滑块取值失败：|r"] .. tostring(err))
             end
         end
         self.syncers[#self.syncers + 1] = safeSync
@@ -958,7 +1011,7 @@ function ns.UI.NewLayout(panel)
         ns._diag = ns._diag or {}
         ns._diag[#ns._diag + 1] = function()
             local g = getter()
-            return ("%-18s 取值=%s 计算=%s 显示=[%s] 可见=%s"):format(
+            return (T["%-18s 取值=%s 计算=%s 显示=[%s] 可见=%s"]):format(
                 tostring(label), tostring(g), fmt(clampSnap(g)),
                 valueFs:GetText() or "", tostring(valueFs:IsShown()))
         end
@@ -1006,7 +1059,8 @@ function ns.UI.NewLayout(panel)
         -- 右端加一个下拉箭头指示，和普通按钮区分开。
         local arrow = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         arrow:SetPoint("RIGHT", b, "RIGHT", -8, 0)
-        arrow:SetText("|cff0cd29f▼|r")
+        arrow:SetText("▼")
+        if ns.UI.StyleText then ns.UI.StyleText(arrow, "accent") end
         local bfs = b:GetFontString()
         if bfs then bfs:SetPoint("RIGHT", arrow, "LEFT", -2, 0) bfs:SetJustifyH("LEFT") bfs:SetPoint("LEFT", b, "LEFT", 8, 0) end
         local function curText()
@@ -1014,7 +1068,7 @@ function ns.UI.NewLayout(panel)
             for _, it in ipairs(items_()) do
                 if it.value == cur then return it.text end
             end
-            return cur or "（未选）"
+            return cur or T["（未选）"]
         end
         local function refresh() b:SetText(prefix .. curText()) end
         b:SetScript("OnClick", function()
@@ -1057,10 +1111,11 @@ function ns.UI.NewLayout(panel)
         local border = btn:CreateTexture(nil, "BACKGROUND")
         border:SetPoint("TOPLEFT", -2, 2)
         border:SetPoint("BOTTOMRIGHT", 2, -2)
-        border:SetColorTexture(unpack(SKIN_BORDER))
+        local function paintBorder() border:SetColorTexture(unpack(SkinBorderColor(btn))) end
+        if ns.UI.OnTheme then ns.UI.OnTheme(paintBorder) else paintBorder() end
         btn.borderTex = border
-        btn:HookScript("OnEnter", function(self) self.borderTex:SetColorTexture(unpack(SKIN_BORDER_HOVER)) end)
-        btn:HookScript("OnLeave", function(self) self.borderTex:SetColorTexture(unpack(SKIN_BORDER)) end)
+        btn:HookScript("OnEnter", function(self) self._skinHovered=true; paintBorder() end)
+        btn:HookScript("OnLeave", function(self) self._skinHovered=nil; paintBorder() end)
         local sw = btn:CreateTexture(nil, "ARTWORK")
         sw:SetAllPoints(btn)
         btn.sw = sw
@@ -1104,7 +1159,11 @@ function ns.UI.NewLayout(panel)
         fs:SetPoint("TOPLEFT", self.indent, self.y)
         fs:SetPoint("RIGHT", self.panel, "RIGHT", -(self.indent + 6), 0)
         fs:SetJustifyH("LEFT")
-        self.syncers[#self.syncers + 1] = function() fs:SetText(getter() or "") end
+        self.syncers[#self.syncers + 1] = function()
+            local value, role = getter()
+            fs:SetText(value or "")
+            if ns.UI.StyleText then ns.UI.StyleText(fs, role or "text") end
+        end
         self:step(22)
         return fs
     end
@@ -1134,12 +1193,12 @@ local function MakePage(name)
 end
 
 local function BuildAbout(L)
-    L:Title("白描工具箱")
-    L:Text("|cff888888BaimiaoToolbox  v" .. GetVersion() .. "  ·  作者 白描|r", true)
+    L:Title(T["白描工具箱"])
+    L:Text("|cff888888BaimiaoToolbox  v" .. GetVersion() .. T["  ·  作者 白描|r"], true)
     L:step(4)
-    L:Text("白描的游戏内小工具合集。下面可勾选启用/停用各功能；左侧展开进入对应功能的详细设置。", false)
+    L:Text(T["白描的游戏内小工具合集。下面可勾选启用/停用各功能；左侧展开进入对应功能的详细设置。"], false)
     L:step(6)
-    L:Section("功能开关")
+    L:Section(T["功能开关"])
     for _, m in ipairs(ns.orderedModules) do
         local id = m.id
         L:Check(m.name or id,
@@ -1150,8 +1209,8 @@ local function BuildAbout(L)
         end
     end
     L:step(6)
-    L:Section("小地图按钮")
-    L:Check("在小地图边缘显示“白描工具箱”按钮（左键设置 / 右键列模块）",
+    L:Section(T["小地图按钮"])
+    L:Check(T["在小地图边缘显示“白描工具箱”按钮（左键设置 / 右键列模块）"],
         function() return ns.IsMinimapButtonShown() end,
         function(v) ns.SetMinimapButtonShown(v) end)
     L:Finalize()
@@ -1164,7 +1223,7 @@ local function BuildSettings()
     aboutLayout:SyncAll()  -- 建完立即同步一次，避免首次打开勾选状态不对
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
-        parentCategory = Settings.RegisterCanvasLayoutCategory(aboutHost, "|cff0cd29f白描工具箱|r")
+        parentCategory = Settings.RegisterCanvasLayoutCategory(aboutHost, T["|cff0cd29f白描工具箱|r"])
         parentCategory.ID = "BaimiaoToolbox"
         Settings.RegisterAddOnCategory(parentCategory)
 
@@ -1173,7 +1232,7 @@ local function BuildSettings()
                 local host, layout = MakePage(m.id)
                 local ok, err = pcall(m.BuildOptions, layout.panel, m, layout)
                 if not ok then
-                    P(("|cffff4040模块 %s 的设置页构建失败：|r%s"):format(tostring(m.id), tostring(err)))
+                    P((T["|cffff4040模块 %s 的设置页构建失败：|r%s"]):format(tostring(m.id), tostring(err)))
                 end
                 layout:Finalize()
                 layout:SyncAll()  -- 同上，先同步一次
@@ -1184,16 +1243,16 @@ local function BuildSettings()
         end
     elseif InterfaceOptions_AddCategory then
         -- 旧接口回退：每个模块单独一页。
-        aboutHost.name = "白描工具箱"
+        aboutHost.name = T["白描工具箱"]
         InterfaceOptions_AddCategory(aboutHost)
         for _, m in ipairs(ns.orderedModules) do
             if m.BuildOptions then
                 local host, layout = MakePage(m.id)
                 host.name = m.name or m.id
-                host.parent = "白描工具箱"
+                host.parent = T["白描工具箱"]
                 local ok, err = pcall(m.BuildOptions, layout.panel, m, layout)
                 if not ok then
-                    P(("|cffff4040模块 %s 的设置页构建失败：|r%s"):format(tostring(m.id), tostring(err)))
+                    P((T["|cffff4040模块 %s 的设置页构建失败：|r%s"]):format(tostring(m.id), tostring(err)))
                 end
                 layout:Finalize()
                 layout:SyncAll()
@@ -1228,12 +1287,12 @@ end
 -- 用于排查"数值框空白"：计算有值而框内为空 → 显示问题；计算报错 → 取值问题。
 function ns.Diag()
     local list = ns._diag or {}
-    P(("—— 滑块自检（共 %d 个）——"):format(#list))
+    P((T["—— 滑块自检（共 %d 个）——"]):format(#list))
     for _, f in ipairs(list) do
         local ok, line = pcall(f)
-        P("  " .. (ok and line or ("|cffff4040自检出错：|r" .. tostring(line))))
+        P("  " .. (ok and line or (T["|cffff4040自检出错：|r"] .. tostring(line))))
     end
-    if #list == 0 then P("  （没有发现滑块，可能设置页没建起来）") end
+    if #list == 0 then P(T["  （没有发现滑块，可能设置页没建起来）"]) end
 end
 
 --------------------------------------------------------------------------------
@@ -1298,7 +1357,7 @@ local function CreateMinimapButton()
 
     b:SetScript("OnClick", function(_, mouseButton)
         if mouseButton == "RightButton" then
-            P("已加载模块（/bm <id> 直达设置）：")
+            P(T["已加载模块（/bm <id> 直达设置）："])
             for _, m in ipairs(ns.orderedModules) do
                 local on = ns.IsModuleEnabled(m.id)
                 P(("  %s|r %s —— %s"):format(
@@ -1311,10 +1370,10 @@ local function CreateMinimapButton()
 
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cff0cd29f白描工具箱|r")
-        GameTooltip:AddLine("左键：打开设置", 0.6, 0.9, 1)
-        GameTooltip:AddLine("右键：查看模块", 0.6, 0.9, 1)
-        GameTooltip:AddLine("拖动：沿小地图边缘移动", 0.6, 0.9, 1)
+        GameTooltip:AddLine(T["|cff0cd29f白描工具箱|r"], nil, nil, nil, true)
+        GameTooltip:AddLine(T["左键：打开设置"], 0.6, 0.9, 1, true)
+        GameTooltip:AddLine(T["右键：查看模块"], 0.6, 0.9, 1, true)
+        GameTooltip:AddLine(T["拖动：沿小地图边缘移动"], 0.6, 0.9, 1, true)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1357,11 +1416,11 @@ ev:SetScript("OnEvent", function()
             if m.OnEnable then m.OnEnable(m) end
         end)
         if not ok then
-            P(("|cffff4040模块 %s 初始化失败：|r%s"):format(tostring(m.id), tostring(err)))
+            P((T["|cffff4040模块 %s 初始化失败：|r%s"]):format(tostring(m.id), tostring(err)))
         end
     end
     local ok, err = pcall(BuildSettings)
-    if not ok then P("|cffff4040设置界面构建失败：|r" .. tostring(err)) end
+    if not ok then P(T["|cffff4040设置界面构建失败：|r"] .. tostring(err)) end
     pcall(CreateMinimapButton)
 end)
 
@@ -1385,16 +1444,16 @@ SlashCmdList["BAIMIAO"] = function(msg)
     if cmd == "minimap" then
         local shown = not ns.IsMinimapButtonShown()
         ns.SetMinimapButtonShown(shown)
-        P("小地图按钮：" .. (shown and "显示" or "隐藏"))
+        P(T["小地图按钮："] .. (shown and T["显示"] or T["隐藏"]))
         return
     end
     if cmd == "diag" then
         ns.Diag()
         return
     end
-    P("已加载模块：")
+    P(T["已加载模块："])
     for _, m in ipairs(ns.orderedModules) do
         P("  " .. m.id .. " —— " .. (m.name or ""))
     end
-    P("用法：/bm 打开设置，/bm <模块id> 直达该模块设置，/bm minimap 切换小地图按钮。")
+    P(T["用法：/bm 打开设置，/bm <模块id> 直达该模块设置，/bm minimap 切换小地图按钮。"])
 end

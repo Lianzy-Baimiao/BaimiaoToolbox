@@ -1,4 +1,5 @@
 local ADDON, ns = ...
+local T = ns.L
 
 --------------------------------------------------------------------------------
 -- 模块：光环/宠物提示器
@@ -28,13 +29,13 @@ local defaults = {
     rules = {
         pet = {
             enabled = true,
-            text = "|cffff2020没有宠物！|r",
+            text = T["|cffff2020没有宠物！|r"],
             skipMarksmanship = true,          -- 射击专精：宠物是可选项，不带不提醒
             loneWolfSpells = DEFAULT_LONE_WOLF,
         },
         paladinAura = {
             enabled = true,
-            text = "|cffff2020没有开光环！|r",
+            text = T["|cffff2020没有开光环！|r"],
             spells = DEFAULT_PALADIN_AURAS,
         },
     },
@@ -222,7 +223,7 @@ local function Update()
 
     -- 解锁状态：始终显示一个占位，方便拖动摆位。
     if not frame:IsLocked() then
-        frame.text:SetText("◆ 提示器（拖动我）◆")
+        frame.text:SetText(T["◆ 提示器（拖动我）◆"])
         frame:Show()
         StopPulse()
         frame:SetSize(math.max(frame.text:GetStringWidth() + 40, 120),
@@ -234,7 +235,7 @@ local function Update()
 
     -- 测试：强制显示示例文本一小段时间。
     if GetTime() < testUntil then
-        frame.text:SetText("|cffff2020提示示例|r")
+        frame.text:SetText(T["|cffff2020提示示例|r"])
         frame:Show()
         if d.pulse then StartPulse() else StopPulse() end
         frame:SetSize(math.max(frame.text:GetStringWidth() + 40, 120),
@@ -277,10 +278,10 @@ local function CreateFrameOnce()
         legacy = DB(),                      -- 旧账号档布局自动迁移
         defaultPos = { point = "CENTER", relPoint = "CENTER", x = 0, y = 180 },
         tooltip = {
-            title = "光环 / 宠物提示器",
+            title = T["光环 / 宠物提示器"],
             lines = {
-                "解锁状态：按住左键拖动摆位",
-                "命令 /remind：lock 锁定 / unlock 解锁 / test 试显示 / auras 列出增益",
+                T["解锁状态：按住左键拖动摆位"],
+                T["命令 /remind：lock 锁定 / unlock 解锁 / test 试显示 / auras 列出增益"],
             },
         },
     })
@@ -364,70 +365,70 @@ end
 --------------------------------------------------------------------------------
 
 local function BuildOptions(panel,m,L)
-    L:Title("光环 / 宠物提醒")
-    L:Text("按职业规则提醒缺少宠物或光环；先设触发条件，再测试外观。",true)
+    L:Title(T["光环 / 宠物提醒"])
+    L:Text(T["按职业规则提醒缺少宠物或光环；先设触发条件，再测试外观。"],true)
     m.optionTabs=ns.UI.OptionTabs(panel,L,{
-        {name="提醒规则",width=150,build=function(panel,L)
-    L:Section("触发条件")
-    L:Check("术士/猎人 没有宠物时提醒",
+        {name=T["提醒规则"],width=150,build=function(panel,L)
+    L:Section(T["触发条件"])
+    L:Check(T["术士/猎人 没有宠物时提醒"],
         function() return DB().rules.pet.enabled end,
         function(v) DB().rules.pet.enabled = v end, Refresh)
-    L:Text("宠物提醒文字（支持 |cffRRGGBB 颜色码、\\n 无效请直接换行）:", true)
+    L:Text(T["宠物提醒文字（支持 |cffRRGGBB 颜色码、\\n 无效请直接换行）:"], true)
     L:Box(460, 26, false,
         function() return DB().rules.pet.text end,
         function(v) DB().rules.pet.text = v end, Refresh)
-    L:Check("射击猎（射击专精）不带宠物不提醒（宠物是可选项）",
+    L:Check(T["射击猎（射击专精）不带宠物不提醒（宠物是可选项）"],
         function() return DB().rules.pet.skipMarksmanship end,
         function(v) DB().rules.pet.skipMarksmanship = v end, Refresh)
 
 
-    L:Check("骑士 没开光环时提醒",
+    L:Check(T["骑士 没开光环时提醒"],
         function() return DB().rules.paladinAura.enabled end,
         function(v) DB().rules.paladinAura.enabled = v end, Refresh)
-    L:Text("骑士光环提醒文字:", true)
+    L:Text(T["骑士光环提醒文字:"], true)
     L:Box(460, 26, false,
         function() return DB().rules.paladinAura.text end,
         function(v) DB().rules.paladinAura.text = v end, Refresh)
 
 
-    L:Section("提醒时机")
-    L:Check("只在脱战时提醒",
+    L:Section(T["提醒时机"])
+    L:Check(T["只在脱战时提醒"],
         function() return DB().onlyOutOfCombat end,
         function(v) DB().onlyOutOfCombat = v end, Refresh)
-    L:Check("死亡/鬼魂时不提醒",
+    L:Check(T["死亡/鬼魂时不提醒"],
         function() return DB().hideWhenDead end,
         function(v) DB().hideWhenDead = v end, Refresh)
 
 
         end},
-        {name="外观与测试",width=150,build=function(panel,L)
-    L:Section("外观")
-    L:Slider("BaimiaoReminderFontSlider", "字号", 16, 72, 1,
+        {name=T["外观与测试"],width=150,build=function(panel,L)
+    L:Section(T["外观"])
+    L:Slider("BaimiaoReminderFontSlider", T["字号"], 16, 72, 1,
         function() return DB().fontSize or 40 end,
         function(v) DB().fontSize = v end, Refresh)
-    L:ColorSwatch("默认文字颜色",
+    L:ColorSwatch(T["默认文字颜色"],
         function() local c = DB().color return c.r, c.g, c.b end,
         function(r, g, b) DB().color = { r = r, g = g, b = b } end, Refresh)
-    L:Check("闪烁提醒", function() return DB().pulse end,
+    L:Check(T["闪烁提醒"], function() return DB().pulse end,
         function(v) DB().pulse = v end, Refresh)
-    L:Check("锁定位置（锁定后不挡鼠标；解锁可拖动摆位）",
+    L:Check(T["锁定位置（锁定后不挡鼠标；解锁可拖动摆位）"],
         function() return LayoutDB().locked end,
         function(v) LayoutDB().locked = v end, Refresh)
 
-    L:Text("测试仅在自己屏幕上显示 3 秒，不向聊天频道发送内容。",true)
-    L:Button(160, "测试显示 3 秒", function()
+    L:Text(T["测试仅在自己屏幕上显示 3 秒，不向聊天频道发送内容。"],true)
+    L:Button(160, T["测试显示 3 秒"], function()
         testUntil = GetTime() + 3
         Update()
     end)
         end},
-        {name="高级识别",width=150,build=function(panel,L)
-    L:Section("法术识别列表")
-    L:Text("通常无需修改。仅在版本变化导致识别异常时调整；请保留原列表供回退。",true)
-    L:Text("算作“独来独往”的法术 id（逗号分隔，随版本可改）:", true)
+        {name=T["高级识别"],width=150,build=function(panel,L)
+    L:Section(T["法术识别列表"])
+    L:Text(T["通常无需修改。仅在版本变化导致识别异常时调整；请保留原列表供回退。"],true)
+    L:Text(T["算作“独来独往”的法术 id（逗号分隔，随版本可改）:"], true)
     L:Box(460, 26, false,
         function() return DB().rules.pet.loneWolfSpells or DEFAULT_LONE_WOLF end,
         function(v) DB().rules.pet.loneWolfSpells = v end, Refresh)
-    L:Text("算作“已开光环”的法术 id（逗号分隔，随版本可改）:", true)
+    L:Text(T["算作“已开光环”的法术 id（逗号分隔，随版本可改）:"], true)
     L:Box(460, 26, false,
         function() return DB().rules.paladinAura.spells end,
         function(v) DB().rules.paladinAura.spells = v end, Refresh)
@@ -446,22 +447,22 @@ local function SetupSlash()
     SlashCmdList["BMREMINDER"] = function(msg)
         local cmd = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
         if cmd == "lock" then
-            LayoutDB().locked = true; Refresh(); ns.Print("提示器：已锁定。")
+            LayoutDB().locked = true; Refresh(); ns.Print(T["提示器：已锁定。"])
         elseif cmd == "unlock" then
-            LayoutDB().locked = false; Refresh(); ns.Print("提示器：已解锁，可拖动摆位。")
+            LayoutDB().locked = false; Refresh(); ns.Print(T["提示器：已解锁，可拖动摆位。"])
         elseif cmd == "reset" then
             local d = LayoutDB()
             d.point, d.relPoint, d.x, d.y = "CENTER", "CENTER", 0, 180
-            Refresh(); ns.Print("提示器：位置已重置。")
+            Refresh(); ns.Print(T["提示器：位置已重置。"])
         elseif cmd == "test" then
             testUntil = GetTime() + 3; Update()
         elseif cmd == "auras" then
             -- 列出当前身上所有增益的名字和 spellId，方便找光环真正的 id。
             local buffs, ok = ScanPlayerBuffs()
             if not ok then
-                ns.Print("当前无法读取增益（游戏把它标成了“秘密值”，通常在战斗/副本中）。请脱战后再试。")
+                ns.Print(T["当前无法读取增益（游戏把它标成了“秘密值”，通常在战斗/副本中）。请脱战后再试。"])
             else
-                ns.Print("当前增益（把要当光环的那个 id 填进设置）：")
+                ns.Print(T["当前增益（把要当光环的那个 id 填进设置）："])
                 local any = false
                 for id in pairs(buffs) do
                     any = true
@@ -469,7 +470,7 @@ local function SetupSlash()
                     local nm = (info and info.name) or (GetSpellInfo and GetSpellInfo(id)) or "?"
                     ns.Print("  " .. id .. " —— " .. nm)
                 end
-                if not any then ns.Print("  （没扫到增益）") end
+                if not any then ns.Print(T["  （没扫到增益）"]) end
             end
         else
             ns.OpenOptions(MODULE_ID)
@@ -483,8 +484,8 @@ end
 
 ns.RegisterModule({
     id = MODULE_ID,
-    name = "光环/宠物提示器",
-    desc = "屏幕中间大字提醒：术士/猎人没宠物（射击专精除外）、骑士没开光环。文字/颜色/字号可编辑。",
+    name = T["光环/宠物提示器"],
+    desc = T["屏幕中间大字提醒：术士/猎人没宠物（射击专精除外）、骑士没开光环。文字/颜色/字号可编辑。"],
     defaults = defaults,
     OnEnable = function()
         playerClass = select(2, UnitClass("player"))
