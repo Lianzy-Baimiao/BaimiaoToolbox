@@ -615,31 +615,34 @@ events:SetScript("OnEvent",function(_,event,name)
 end)
 local function BuildOptions(panel,m,L)
     L:Title(T["大秘境信息优化"])
-    m.mythicTabs=UI.OptionTabs(panel,L,{
-        {name=T["显示与布局"],width=150,build=function(_,L)
-            L:Section(T["开始使用"])
-            L:Check(T["启用大秘境信息优化"],function()return DB().show end,function(v)DB().show=v end,Refresh)
-            L:Button(200,T["打开史诗钥石地下城"],openTab)
-            L:Section(T["看板布局"])
-            L:Check(T["显示右侧本周看板"],function()return DB().showWeekly end,function(v)DB().showWeekly=v end,Refresh)
-            L:Slider("BaimiaoMythicScale",T["窗口缩放（%）"],70,130,5,function()return DB().scalePercent end,function(v)DB().scalePercent=v end,Refresh)
-            L:Dropdown(260,T["副本排序："],{{text=T["赛季评分"],value="score"},{text=T["本周最高层数"],value="weekly"},{text=T["副本名称"],value="name"}},
-                function()return DB().sortBy end,function(v)DB().sortBy=v;page=1 end,Refresh)
-        end},
-        {name=T["副本与传送"],width=150,build=function(_,L)
-            L:Section(T["副本卡片"])
-            L:Check(T["显示赛季最佳层数"],function()return DB().showBest end,function(v)DB().showBest=v end,Refresh)
-            L:Check(T["显示副本赛季评分"],function()return DB().showScore end,function(v)DB().showScore=v end,Refresh)
-            L:Check(T["启用手动点击传送"],function()return DB().teleport end,function(v)DB().teleport=v end,Refresh)
-            L:Section(T["宝库"])
-            L:Button(200,T["查看宏伟宝库"],openVault)
-        end},
-        {name=T["兼容与刷新"],width=150,build=function(_,L)
-            L:Check(T["隐藏 Kogo 旧本周看板"],function()return DB().replaceKogo end,function(v)DB().replaceKogo=v end,Refresh)
-            L:Button(200,T["重新请求游戏数据"],function()RequestData();Queue()end)
-        end},
-    })
+    L:Row({
+        function(c)c:Button(280,T["打开史诗钥石地下城"],openTab)end,
+        function(c)c:Button(240,T["查看宏伟宝库"],openVault)end,
+    },280)
+    L:Section(T["显示内容"])
+    L:Check(T["显示大秘境增强界面"],function()return DB().show end,function(v)DB().show=v end,Refresh)
+    L:Row({
+        function(c)c:Check(T["显示右侧本周看板"],function()return DB().showWeekly end,function(v)DB().showWeekly=v end,Refresh)end,
+        function(c)c:Check(T["启用手动点击传送"],function()return DB().teleport end,function(v)DB().teleport=v end,Refresh)end,
+    },260)
+    L:Row({
+        function(c)c:Check(T["显示赛季最佳层数"],function()return DB().showBest end,function(v)DB().showBest=v end,Refresh)end,
+        function(c)c:Check(T["显示副本赛季评分"],function()return DB().showScore end,function(v)DB().showScore=v end,Refresh)end,
+    },260)
+    L:Section(T["看板布局"])
+    L:Row({
+        function(c)c:Slider("BaimiaoMythicScale",T["窗口缩放（%）"],70,130,5,
+            function()return DB().scalePercent end,function(v)DB().scalePercent=v end,Refresh)end,
+        function(c)c:step(18);c:Dropdown(310,T["副本排序："],{
+            {text=T["赛季评分"],value="score"},{text=T["本周最高层数"],value="weekly"},{text=T["副本名称"],value="name"}},
+            function()return DB().sortBy end,function(v)DB().sortBy=v;page=1 end,Refresh)end,
+    },280)
+    m.compatibilityOptions=UI.OptionGroups(panel,L,{{title=T["兼容与刷新"],collapsed=true,build=function(_,c)
+        c:Check(T["隐藏 Kogo 旧本周看板"],function()return DB().replaceKogo end,function(v)DB().replaceKogo=v end,Refresh)
+        c:Button(260,T["重新请求游戏数据"],function()RequestData();Queue()end)
+    end}})
 end
+
 ns.MythicPlus={Refresh=Refresh,GetDB=DB,RequestData=RequestData}
 ns.RegisterModule({id=ID,name=T["大秘境信息优化"],desc=T["副本成绩、本周记录与传送。"],
     defaults=defaults,BuildOptions=BuildOptions,OnEnable=init,

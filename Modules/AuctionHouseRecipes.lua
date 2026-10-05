@@ -9,6 +9,12 @@ local function read(fn,...)
     local ok,value=pcall(fn,...);if ok then return value end
 end
 function R.Invalidate()cached=nil end
+-- Item events are global. Only unresolved reagent data can change this cached
+-- plan; duplicate arrivals for already-resolved materials must not rebuild it.
+function R.InvalidateItem(itemID)
+    if cached and cached.pendingItemIDs[itemID]then cached=nil;return true end
+    return false
+end
 function R.Quality()return A.Integer(A.DB().recipeQuality,1,5) or 5 end
 function R.Crafts()return A.Integer(A.DB().recipeCrafts,1,1000) or 1 end
 function R.Configure(quality,crafts,key)
@@ -42,7 +48,7 @@ function R.QualityLabel(entry)
     return " · "..icon..(entry.highestQuality and T["最高"] or (entry.quality..T["阶"]))
 end
 -- Quality comes from reagent metadata, NEVER item rarity or the array position.
-local function choose(slot,quality)
+local function choose(slot,quality,pendingItemIDs)
     local reagents=slot.reagents
     if type(reagents)~="table" or #reagents==0 then return nil,T["材料信息未就绪"],true end
     if #reagents==1 then
@@ -59,7 +65,7 @@ local function choose(slot,quality)
             -- Only unknown item data is loadable. Known unranked alternatives
             -- are choices (not quality variants); do not silently pick one.
             local name=read(C_Item and C_Item.GetItemInfo or GetItemInfo,id)
-            if not name then A.ItemName(id);return nil,T["正在加载材料品质"],true end
+            if not name then pendingItemIDs[id]=true;A.ItemName(id);return nil,T["正在加载材料品质"],true end
             return nil,T["存在非品质材料选项，需自行确认"]
         end
         if byQuality[rank] and byQuality[rank].itemID~=id then return nil,T["同品质有多个选项，需自行确认"] end
@@ -69,16 +75,17 @@ local function choose(slot,quality)
     if not byQuality[wanted]then return nil,T["没有所选品质，需自行确认"] end
     return byQuality[wanted],nil,false,wanted,wanted==maxQuality
 end
-local function boundOnPickup(id)
+local function boundOnPickup(id,pendingItemIDs)
     local fn=C_Item and C_Item.GetItemInfo or GetItemInfo
     if type(fn)~="function"then return false end
     local info={pcall(fn,id)}
+    if not info[1] or not info[2]then pendingItemIDs[id]=true;A.ItemName(id)end
     -- GetItemInfo's 14th return is bindType; quality/rarity is not binding.
     return info[1] and info[15]==1
 end
 function R.Plan()
     if cached then return cached end
-    local plan={name=T["追踪配方"],items={},recipes={},warnings={},recipeCount=0}
+    local plan={name=T["追踪配方"],items={},recipes={},warnings={},recipeCount=0,pendingItemIDs={}}
     cached=plan
     local api=C_TradeSkillUI
     if not api or type(api.GetRecipesTracked)~="function" or type(api.GetRecipeSchematic)~="function"then
@@ -115,8 +122,8 @@ function R.Plan()
                     local basic=Enum and Enum.CraftingReagentType and Enum.CraftingReagentType.Basic
                     if not basic then plan.blocked=T["客户端材料类型信息不可用"];break end
                     if slot.required and slot.reagentType==basic then
-                        local reagent,why,pending,rank,highest=choose(slot,quality)
-                        if reagent and boundOnPickup(reagent.itemID)then
+                        local reagent,why,pending,rank,highest=choose(slot,quality,plan.pendingItemIDs)
+                        if reagent and boundOnPickup(reagent.itemID,plan.pendingItemIDs)then
                             warn(recipe.name.."："..A.ItemName(reagent.itemID)..T["是绑定材料，不从拍卖行采购"])
                         elseif reagent then
                             local id=reagent.itemID

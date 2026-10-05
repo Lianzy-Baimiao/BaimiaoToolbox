@@ -242,16 +242,32 @@ local function createRow(index)
 end
 -- Never compare, calculate with, or stringify restricted cooldown values.
 local secret=issecretvalue or function() return false end
-local function query(fn,spell)
+-- Cache only within one repaint: duplicate icons share API reads, not UI state.
+-- Separate seen flags avoid comparing or branching on restricted API results.
+local events=CreateFrame("Frame")
+local function newQueryCache() return {seen={},values={}} end
+local chargesCache,chargeDurationCache=newQueryCache(),newQueryCache()
+local cooldownCache,cooldownDurationCache=newQueryCache(),newQueryCache()
+local function clearQueryCache(cache) wipe(cache.seen);wipe(cache.values) end
+local function clearCooldownQueries()
+    clearQueryCache(chargesCache);clearQueryCache(chargeDurationCache)
+    clearQueryCache(cooldownCache);clearQueryCache(cooldownDurationCache)
+end
+local function query(fn,spell,cache)
     if not fn then return nil end
+    if cache and cache.seen[spell] then return cache.values[spell] end
     local ok,value=pcall(fn,spell)
+    if cache then
+        cache.seen[spell]=true
+        if ok then cache.values[spell]=value end
+    end
     if ok then return value end
 end
 local function paintCooldown(cell)
     local cd=cell.cooldown
     cd:Clear();cell.charges:SetText("")
     if not DB().showCooldowns or not cell.spell or not C_Spell then return end
-    local charges=query(C_Spell.GetSpellCharges,cell.spell)
+    local charges=query(C_Spell.GetSpellCharges,cell.spell,chargesCache)
     local charging=false
     if type(charges)=="table" then
         local current,maximum=charges.currentCharges,charges.maxCharges
@@ -261,12 +277,12 @@ local function paintCooldown(cell)
         end
     end
     -- Duration objects are passed straight to the native widget, including in combat.
-    local duration=query(C_Spell.GetSpellChargeDuration,cell.spell)
-    if not duration then duration=query(C_Spell.GetSpellCooldownDuration,cell.spell) end
+    local duration=query(C_Spell.GetSpellChargeDuration,cell.spell,chargeDurationCache)
+    if not duration then duration=query(C_Spell.GetSpellCooldownDuration,cell.spell,cooldownDurationCache) end
     if duration and cd.SetCooldownFromDurationObject then
         if pcall(cd.SetCooldownFromDurationObject,cd,duration) then return end
     end
-    local info=query(C_Spell.GetSpellCooldown,cell.spell)
+    local info=query(C_Spell.GetSpellCooldown,cell.spell,cooldownCache)
     local start,length,rate
     if charging then
         start,length,rate=charges.cooldownStartTime,charges.cooldownDuration,charges.chargeModRate
@@ -281,9 +297,23 @@ local function paintCooldown(cell)
     end
 end
 local function updateCooldowns()
+    events:SetScript("OnUpdate",nil)
+    clearCooldownQueries()
     for _,f in pairs(frames) do
-        if f:IsShown() then
+        if f:IsVisible() then
             for _,cell in ipairs(f.cells) do if cell:IsShown() then paintCooldown(cell) end end
+        end
+    end
+    -- Do not retain API tables or duration objects between frames.
+    clearCooldownQueries()
+end
+local function queueCooldowns()
+    if events:GetScript("OnUpdate") or not DB().showCooldowns then return end
+    for _,f in pairs(frames) do
+        if f:IsVisible() then
+            -- Cooldown and charge events in the same frame need one repaint.
+            events:SetScript("OnUpdate",updateCooldowns)
+            return
         end
     end
 end
@@ -548,9 +578,8 @@ local function BuildOptions(panel,m,L)
     m.rotationTabs=Tabs(panel,L,entries)
 end
 
-local events=CreateFrame("Frame")
 events:SetScript("OnEvent",function(_,event)
-    if event=="SPELL_UPDATE_COOLDOWN" or event=="SPELL_UPDATE_CHARGES" then updateCooldowns() else Refresh() end
+    if event=="SPELL_UPDATE_COOLDOWN" or event=="SPELL_UPDATE_CHARGES" then queueCooldowns() else Refresh() end
 end)
 local function setupEvents()
     events:RegisterEvent("SPELL_UPDATE_COOLDOWN")
@@ -572,6 +601,6 @@ ns.RegisterModule({id=ID,name=T["循环提示助手"],desc=T["按职业专精自
         ns.UI.OnTheme(paint)
         Refresh()
     end,
-    OnDisable=function() events:UnregisterAllEvents();for _,f in pairs(frames) do f:Hide() end end,
+    OnDisable=function() events:UnregisterAllEvents();events:SetScript("OnUpdate",nil);clearCooldownQueries();for _,f in pairs(frames) do f:Hide() end end,
     OnToggle=function(_,on) if on then setupEvents() end;Refresh() end,
 })

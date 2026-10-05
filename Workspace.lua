@@ -22,6 +22,8 @@ local palettes = {
     },
 }
 local painters, workspace, current, nav, pages = {}, nil, "overview", {}, {}
+local createModulePage, createAppearancePage
+local settingsInitialized=false
 UI.palette = palettes.dark
 local function prefs()
     local db = ns.GetPCDB()
@@ -136,7 +138,14 @@ local function refresh()
     end
 end
 local function selectPage(key)
-    key = pages[key] and key or "overview"
+    if InCombatLockdown() then return end
+    local module=ns.modules[key]
+    key=(pages[key] or (module and module.BuildOptions) or key=="appearance") and key or "overview"
+    -- WoW frames live for the whole session. Build only visited pages, once.
+    if not pages[key] then
+        if key=="appearance" then createAppearancePage()
+        else createModulePage(ns.modules[key]) end
+    end
     -- Commit/clear an actively edited native option before hiding its page.
     if GetCurrentKeyBoardFocus then
         local focus=GetCurrentKeyBoardFocus()
@@ -151,7 +160,7 @@ local function selectPage(key)
     local m=ns.modules[key]
     workspace.currentModule=m
     workspace.heading:SetText(m and m.name or (key=="appearance" and T["外观设置"] or T["旅程，从容开始。"]))
-    workspace.eyebrow:SetText(m and T["MODULE SETTINGS / 功能设置"] or (key=="appearance" and T["APPEARANCE / 全局外观"] or "YOUR ADVENTURE, ORGANIZED"))
+    workspace.eyebrow:SetText(m and T["修改即时生效 · 输入框回车或失焦保存"] or (key=="appearance" and T["APPEARANCE / 全局外观"] or "YOUR ADVENTURE, ORGANIZED"))
     workspace.toggle:SetShown(m~=nil)
     if m and m._syncLayout and not InCombatLockdown() then m._syncLayout:SyncAll() end
     refresh()
@@ -271,13 +280,14 @@ function UI.MakeScrollable(host)
     scroll:SetScript("OnShow",update)
     return child,scroll
 end
-local function createModulePage(m)
+createModulePage=function(m)
     local host=CreateFrame("Frame",nil,workspace.content)
     host:SetAllPoints();host:Hide();pages[m.id]=host
     local child,scroll=UI.MakeScrollable(host)
     -- Explicit width while hidden prevents first-open wrapping/height errors.
     child:SetWidth(738)
     local layout=UI.NewLayout(child)
+    layout.hasPageHeading=true
     local ok,err=pcall(m.BuildOptions,child,m,layout)
     if not ok then
         ns.Print(T["设置页构建失败："]..m.id.." / "..tostring(err))
@@ -287,7 +297,7 @@ local function createModulePage(m)
     styleOptions(child)
     host:SetScript("OnShow",function() if not InCombatLockdown() then layout:SyncAll() end end)
 end
-local function createAppearancePage()
+createAppearancePage=function()
     local host=CreateFrame("Frame",nil,workspace.content)
     host:SetAllPoints();host:Hide();pages.appearance=host
     local child=UI.MakeScrollable(host)
@@ -303,7 +313,8 @@ local function createAppearancePage()
     host:SetScript("OnShow",function() if not InCombatLockdown() then layout:SyncAll() end end)
 end
 function UI.BuildWorkspace()
-    if workspace then return end
+    if workspace or InCombatLockdown() then return end
+    UI.InitializeSettings()
     UI.palette=palettes[prefs().theme] or palettes.dark
     workspace=surface(UIParent,"bg")
     -- The named escape target is non-secure and never parents gameplay buttons.
@@ -346,9 +357,9 @@ function UI.BuildWorkspace()
     workspace.content:SetPoint("TOPLEFT",208,-112);workspace.content:SetPoint("BOTTOMRIGHT",-24,16)
     createOverview();navItem("overview",T["工作台总览"],0)
     for i,m in ipairs(ns.orderedModules) do
-        if m.BuildOptions then createModulePage(m);navItem(m.id,m.name or m.id,i) end
+        if m.BuildOptions then navItem(m.id,m.name or m.id,i) end
     end
-    createAppearancePage();navItem("appearance",T["外观设置"],#ns.orderedModules+1)
+    navItem("appearance",T["外观设置"],#ns.orderedModules+1)
     -- An opaque, higher-level guard prevents unsafe edits when combat begins
     -- while settings are open. Theme/close controls remain usable.
     local guard=surface(workspace)
@@ -381,6 +392,14 @@ function UI.BuildWorkspace()
         if ns.AuctionHouse and ns.AuctionHouse.OnWorkspaceHide then ns.AuctionHouse.OnWorkspaceHide()end
     end)
     applyTheme();selectPage("overview");syncCombat();fitWindow()
+end
+
+-- Login needs only the native Settings launcher and saved theme. The workspace
+-- and each module editor are created by explicit navigation, not by login.
+function UI.InitializeSettings()
+    if settingsInitialized then return end
+    settingsInitialized=true
+    applyTheme()
     -- Keep the standard Blizzard Settings entry without constructing options twice.
     if Settings and Settings.RegisterCanvasLayoutCategory then
         local launcher=CreateFrame("Frame")
@@ -397,11 +416,100 @@ function UI.BuildWorkspace()
     end
 end
 function UI.OpenWorkspace(moduleId)
-    if not workspace then UI.BuildWorkspace() end
-    -- Never open editable options during combat; the guard also covers a window
-    -- that was already open before PLAYER_REGEN_DISABLED.
+    -- Check before constructing even the workspace shell.
     if combatMessage() then return end
+    if not workspace then UI.BuildWorkspace() end
     selectPage(moduleId or "overview");workspace:Show();workspace:Raise()
+end
+
+-- Commit only the region being hidden, not another editor in the workspace.
+function UI.CommitOptionsFocus(panel)
+    if InCombatLockdown() then return end
+    local focus=GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
+    if focus and focus.IsDescendantOf and focus:IsDescendantOf(panel) then focus:ClearFocus() end
+end
+
+-- A terminal stack of settings groups, built once. Collapsing or disabling a
+-- group only changes visibility/geometry; values and editor frames are retained.
+-- enabled/setEnabled add a persistent header switch; visible hides the whole
+-- group for dependent settings. collapsed is session-only presentation state.
+function UI.OptionGroups(panel,L,entries,onResize)
+    local hadCard=L._card~=nil
+    L:_closeCard()
+    if hadCard then L:step(12) end
+    local top=L.y
+    local groups={}
+    local ready,updating=false,false
+    local function reflow()
+        if not ready or updating then return end
+        updating=true
+        local y,any=top,false
+        for _,g in ipairs(groups) do
+            local entry=g.entry
+            local visible=not entry.visible or entry.visible()
+            local enabled=not entry.enabled or entry.enabled()
+            local expanded=visible and enabled and not g.collapsed
+            if not expanded then UI.CommitOptionsFocus(g.body) end
+            g.frame:SetShown(visible)
+            g.body:SetShown(expanded)
+            if g.fold then
+                g.fold:SetEnabled(enabled)
+                g.fold:SetText(expanded and T["收起设置"] or T["展开设置"])
+            end
+            local height=g.headerHeight+(expanded and g.layout.panel:GetHeight() or 0)
+            g.frame:SetHeight(height)
+            if visible then
+                g.frame:ClearAllPoints();g.frame:SetPoint("TOPLEFT",8,y)
+                g.frame:SetPoint("TOPRIGHT",-8,y)
+                y=y-height-12;any=true
+            end
+        end
+        L.y=any and y+12 or top;L:Finalize()
+        updating=false
+        if onResize then onResize() end
+    end
+    for _,entry in ipairs(entries) do
+        local f=surface(panel)
+        f:SetWidth(panel:GetWidth()-16)
+        local g={frame=f,entry=entry,collapsed=entry.collapsed==true}
+        groups[#groups+1]=g
+        local header=UI.NewLayout(f)
+        header.y=-14;header.indent=14
+        header._cellWidth=f:GetWidth()-(entry.collapsed~=nil and 150 or 28)
+        local title
+        if entry.enabled then
+            g.toggle=header:Check(entry.title,entry.enabled,function(v)
+                entry.setEnabled(v);reflow()
+            end)
+            title=g.toggle.label
+        else
+            title=text(f,entry.title,13,"accent")
+            title:SetPoint("TOPLEFT",14,-14);title:SetWidth(header._cellWidth)
+            title:SetWordWrap(true)
+        end
+        g.headerHeight=math.max(44,title:GetStringHeight()+28)
+        if entry.collapsed~=nil then
+            g.fold=button(f,"",112,function()
+                if InCombatLockdown() then return end
+                g.collapsed=not g.collapsed;reflow()
+            end)
+            g.fold:SetHeight(26);g.fold:SetPoint("TOPRIGHT",-12,-9)
+        end
+        local body=CreateFrame("Frame",nil,f)
+        body:SetPoint("TOPLEFT",0,-g.headerHeight);body:SetPoint("TOPRIGHT",0,-g.headerHeight)
+        body:SetWidth(f:GetWidth());g.body=body
+        local layout=UI.NewLayout(body);layout.y=-4;layout.indent=14;g.layout=layout
+        if entry.build then entry.build(body,layout,reflow) end
+        layout:Finalize()
+        if not entry.build then body:SetHeight(0) end
+        g.header=header
+    end
+    L.syncers[#L.syncers+1]=function()
+        for _,g in ipairs(groups) do g.header:SyncAll();g.layout:SyncAll() end
+        reflow()
+    end
+    ready=true;reflow()
+    return {groups=groups,Refresh=reflow}
 end
 
 -- Build each tab once: switching never destroys edit boxes or their drafts.

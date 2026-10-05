@@ -232,19 +232,22 @@ local function stop()
     if ns.SmallToolsExtras then ns.SmallToolsExtras.Stop()end
     if copyDialog then copyDialog:Hide()end
 end
-local function BuildOptions(_,m,L)
+local function BuildOptions(panel,m,L)
     L:Title(T["小工具集合"])
-    L:Section(T["右键菜单"])
-    L:Row({
-        function(cell) cell:Check(T["公会邀请"],function()return DB().guildInvite end,function(v)DB().guildInvite=v end) end,
-        function(cell) cell:Check(T["多角色在线：选择角色邀请组队"],function()return DB().multiInvite end,function(v)DB().multiInvite=v end) end,
-    }, 260)
-    L:Check(T["复制角色名（名字-服务器）"],function()return DB().copyName end,function(v)
-        DB().copyName=v;if not v and copyDialog then copyDialog:Hide()end
-    end)
-    if ns.SmallToolsExtras then ns.SmallToolsExtras.BuildOptions(L)end
-    if ns.MarkerAssist then ns.MarkerAssist.BuildOptions(L)end
+    local groups={{title=T["右键菜单"],build=function(_,c)
+        c:Row({
+            function(cell)cell:Check(T["公会邀请"],function()return DB().guildInvite end,function(v)DB().guildInvite=v end)end,
+            function(cell)cell:Check(T["多角色在线：选择角色邀请组队"],function()return DB().multiInvite end,function(v)DB().multiInvite=v end)end,
+        },260)
+        c:Check(T["复制角色名（名字-服务器）"],function()return DB().copyName end,function(v)
+            DB().copyName=v;if not v and copyDialog then copyDialog:Hide()end
+        end)
+    end}}
+    if ns.SmallToolsExtras then ns.SmallToolsExtras.AddOptionGroups(groups)end
+    if ns.MarkerAssist then ns.MarkerAssist.AddOptionGroups(groups)end
+    m.optionGroups=ns.UI.OptionGroups(panel,L,groups)
 end
+
 events:SetScript("OnEvent",function() if ns.IsModuleEnabled(ID) then register() end end)
 ns.RegisterModule({id=ID,name=T["小工具集合"],desc=T["右键邀请与复制、进本与排队提醒、交易回执、标记与倒数。"],defaults=defaults,
     BuildOptions=BuildOptions,OnEnable=start,

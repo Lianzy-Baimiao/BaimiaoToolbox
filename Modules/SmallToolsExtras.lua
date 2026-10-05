@@ -267,15 +267,7 @@ end
 function M.Stop()
     running=false;refresh()
 end
-function M.BuildOptions(L)
-    local function check(label,key)
-        return function(cell)
-            cell:Check(label,function()return DB()[key]end,function(v)DB()[key]=v;refresh()end)
-        end
-    end
-    L:Section(T["轻量提醒与回执"])
-    L:Row({check(T["进本信息小条"],"instanceInfo"),check(T["排队就绪提醒"],"queueReady")},240)
-    L:Row({check(T["排队提示音（遵循游戏声音设置）"],"queueSound"),check(T["交易完成回执（仅自己可见）"],"tradeReceipt")},240)
+function M.AddOptionGroups(groups)
     local function timing(label,key)
         return function(cell)
             local limits=timingLimits[key]
@@ -283,15 +275,29 @@ function M.BuildOptions(L)
                 function()return seconds(key)end,function(v)DB()[key]=v end)
         end
     end
-    L:Row({timing(T["进本停留时间（秒）"],"instanceHoldSeconds"),timing(T["进本渐隐时间（秒）"],"instanceFadeSeconds")},240)
-    L:Row({timing(T["排队停留时间（秒）"],"queueHoldSeconds"),timing(T["排队渐隐时间（秒）"],"queueFadeSeconds")},240)
-    L:Text(T["仅显示文字，无背景和边框。停留后开始渐隐；渐隐设为 0 时直接隐藏，新设置从下次提醒或预览生效。交易回执仅自己可见，不保存历史、不发频道。"],true)
-    L:Row({function(cell)cell:Button(150,T["预览进本小条"],function()
-        if enabled("instanceInfo") then toast("instanceInfo",T["|cff0cd29f进本信息 · 示例（非当前状态）|r\n史诗难度  |  拾取专精：惩戒  |  最低耐久：|cffff665528%|r"])end
-    end)end,function(cell)cell:Button(150,T["预览排队提醒"],function()
-        if enabled("queueReady") then queueNotice(T["示例队列（非实际邀请）"])end
-    end)end},180)
+    groups[#groups+1]={title=T["进本信息小条"],collapsed=true,
+        enabled=function()return DB().instanceInfo end,setEnabled=function(v)DB().instanceInfo=v;refresh()end,
+        build=function(_,L)
+            L:Row({timing(T["进本停留时间（秒）"],"instanceHoldSeconds"),timing(T["进本渐隐时间（秒）"],"instanceFadeSeconds")},260)
+            L:Text(T["停留后渐隐；渐隐为 0 时直接隐藏。修改从下次提醒或预览生效。"],true)
+            L:Button(200,T["预览进本小条"],function()
+                if enabled("instanceInfo")then toast("instanceInfo",T["|cff0cd29f进本信息 · 示例（非当前状态）|r\n史诗难度  |  拾取专精：惩戒  |  最低耐久：|cffff665528%|r"])end
+            end)
+        end}
+    groups[#groups+1]={title=T["排队就绪提醒"],collapsed=true,
+        enabled=function()return DB().queueReady end,setEnabled=function(v)DB().queueReady=v;refresh()end,
+        build=function(_,L)
+            L:Check(T["排队提示音（遵循游戏声音设置）"],function()return DB().queueSound end,function(v)DB().queueSound=v end)
+            L:Row({timing(T["排队停留时间（秒）"],"queueHoldSeconds"),timing(T["排队渐隐时间（秒）"],"queueFadeSeconds")},260)
+            L:Text(T["停留后渐隐；渐隐为 0 时直接隐藏。修改从下次提醒或预览生效。"],true)
+            L:Button(200,T["预览排队提醒"],function()
+                if enabled("queueReady")then queueNotice(T["示例队列（非实际邀请）"])end
+            end)
+        end}
+    groups[#groups+1]={title=T["交易完成回执（仅自己可见）"],
+        enabled=function()return DB().tradeReceipt end,setEnabled=function(v)DB().tradeReceipt=v;refresh()end}
 end
+
 events:SetScript("OnEvent",function(_,event,a,b)
     if not running or not ns.IsModuleEnabled("smalltools") then return end
     if event=="PLAYER_ENTERING_WORLD" then enteredWorld(a,b)

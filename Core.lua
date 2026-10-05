@@ -483,6 +483,7 @@ function ns.UI.NewLayout(panel)
     end
 
     function L:Title(text)
+        if self.hasPageHeading then return end
         local fs = self.panel:CreateFontString(nil, "ARTWORK", "GameFontNormalHuge")
         fs:SetPoint("TOPLEFT", 16, self.y)
         fs:SetText(text)
@@ -674,7 +675,8 @@ function ns.UI.NewLayout(panel)
             PaintSkinBorder(box)
         end)
 
-        -- 右侧“保存”按钮 + “已保存”提示。让用户明确知道有没有生效。
+        -- Multi-line editors retain an explicit save action. Single-line fields
+        -- already commit on Enter/focus loss; do not suggest an extra save step.
         local saveBtn = CreateFrame("Button", nil, self.panel, "UIPanelButtonTemplate")
         saveBtn:SetSize(56, 22)
         saveBtn:SetPoint("LEFT", box, "RIGHT", 8, 0)
@@ -683,13 +685,16 @@ function ns.UI.NewLayout(panel)
         local flash = self.panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         flash:SetPoint("LEFT", saveBtn, "RIGHT", 6, 0)
         flash:SetText("")
-        -- 紧凑单行表格不另占保存按钮/提示的列；回车或失焦提交，Esc 取消。
-        if compact and not multi then saveBtn:Hide(); flash:Hide() end
+        if not multi then
+            saveBtn:Hide()
+            flash:ClearAllPoints();flash:SetPoint("LEFT",box,"RIGHT",8,0)
+            if compact then flash:Hide() end
+        end
 
         local dirty = false
         local function markDirty()
             dirty = true
-            flash:SetText(T["未保存*"])
+            flash:SetText(multi and T["未保存*"] or T["编辑中"])
             if ns.UI.StyleText then ns.UI.StyleText(flash, "warning")
             else flash:SetTextColor(1, 0.82, 0) end
         end
@@ -1217,6 +1222,7 @@ local function BuildAbout(L)
 end
 
 local function BuildSettings()
+    if ns.UI.InitializeSettings then return ns.UI.InitializeSettings() end
     if ns.UI.BuildWorkspace then return ns.UI.BuildWorkspace() end
     local aboutHost, aboutLayout = MakePage("about")
     BuildAbout(aboutLayout)

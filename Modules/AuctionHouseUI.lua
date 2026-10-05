@@ -528,13 +528,34 @@ function A.SyncPanel()
     if A.IsOpen and A.IsOpen() and A.DB().showPanel and ns.IsModuleEnabled("auctionhouse")then A.ShowPanel()
     elseif panel then panel.pendingShow=nil;panel:Hide()end
 end
+local function refreshRowInventory(row)
+    local entry=row.entry
+    local owned,mail,need,known=A.Inventory(entry.itemID,entry.target,entry.includeBank)
+    local count=T["持有 "]..(owned or "?")..T[" · 在邮 "]..(known and mail or (mail>0 and (mail.."+") or "?"))..T[" · 待补 "]..(need or "?")
+    if row.count:GetText()~=count then row.count:SetText(count)end
+    local reserved=A.HasReservation(entry.itemID)
+    row.retry:SetShown(reserved);row.status:SetShown(not reserved)
+    local status=A.StatusFor(entry.itemID) or (need==0 and T["已备齐"] or T["待查询"])
+    if row.status:GetText()~=status then row.status:SetText(status)end
+end
+-- Bag events change inventory, not the catalog, row layout, or editable settings.
+-- Only visible restock rows need sampling; switching pages performs a full refresh.
+function A.RefreshInventory()
+    local f=panel
+    if not f or not f:IsVisible() or f.tab=="quick"then return end
+    for _,row in ipairs(f.restock.rows)do
+        if row.entry and row:IsVisible()then refreshRowInventory(row)end
+    end
+end
 local refreshing=false
 function A.RefreshUI()
     if refreshing then return end
     refreshing=true
     for _,e in ipairs(editors)do if e:IsVisible()then e:Refresh()end end
     local f=panel
-    if f then
+    -- IsShown alone is insufficient: the native AH parent may already be hidden
+    -- before AUCTION_HOUSE_CLOSED arrives. ShowPanel repaints when reopened.
+    if f and f:IsVisible()then
         local d=A.DB();local quick=f.tab=="quick";local recipes=f.tab=="recipes"
         f.quick:SetShown(quick);f.restock:SetShown(not quick)
         for key,b in pairs(f.tabs)do b.edge:SetShown(key==f.tab)end
@@ -598,13 +619,10 @@ function A.RefreshUI()
                 local index=(f.page-1)*size+i;local entry=i<=size and list[index] or nil;row.entry=entry;row:SetShown(entry~=nil)
                 row:ClearAllPoints();row:SetPoint("TOPLEFT",0,-(recipes and 132 or 60)-(i-1)*48)
                 if entry then
-                    local owned,mail,need,known=A.Inventory(entry.itemID,entry.target,entry.includeBank)
-                    row.name:SetText(itemName(entry)..A.Recipes.QualityLabel(entry));tooltip(row,entry.itemID);row:EnableMouse(true);row.count:SetText(T["持有 "]..(owned or "?")..T[" · 在邮 "]..(known and mail or (mail>0 and (mail.."+") or "?"))..T[" · 待补 "]..(need or "?"))
+                    row.name:SetText(itemName(entry)..A.Recipes.QualityLabel(entry));tooltip(row,entry.itemID);row:EnableMouse(true)
+                    refreshRowInventory(row)
                     row.search:SetEnabled(A.IsOpen() and not A.IsPurchasing() and not InCombatLockdown())
                     row.limit:SetText((entry.maxPrice or 0)>0 and ("≤ "..A.Money(entry.maxPrice)) or T["不限价"])
-                    local reserved=A.HasReservation(entry.itemID)
-                    row.retry:SetShown(reserved);row.status:SetShown(not reserved)
-                    row.status:SetText(A.StatusFor(entry.itemID) or (need==0 and T["已备齐"] or T["待查询"]))
                 end
             end
         end

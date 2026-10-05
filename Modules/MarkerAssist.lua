@@ -188,32 +188,35 @@ function M.Stop()
     running=false;M.Refresh()
     if not pending then events:UnregisterAllEvents()end
 end
-function M.BuildOptions(L)
-    L:Section(T["标记助手"])
-    L:Check(T["启用标记助手"],function()return DB().enabled end,function(v)DB().enabled=v end,M.Refresh)
-    L:Row({
-        function(cell) cell:Check(T["目标标记"],function()return DB().showTargets end,function(v)DB().showTargets=v end,M.Refresh) end,
-        function(cell) cell:Check(T["地面标记"],function()return DB().showWorlds end,function(v)DB().showWorlds=v end,M.Refresh) end,
-        function(cell) cell:Check(T["团队管理（就位 / 倒数）"],function()return DB().showManagement end,function(v)DB().showManagement=v end,M.Refresh) end,
-    })
-    L:Row({
-        function(cell) cell:Check(T["仅在小队 / 团队中显示"],function()return DB().groupOnly end,function(v)DB().groupOnly=v end,M.Refresh) end,
-        function(cell) cell:Check(T["仅队长显示"],function()return DB().leaderOnly end,function(v)DB().leaderOnly=v end,M.Refresh) end,
-        function(cell) cell:Check(T["锁定位置"],function()return DB().locked end,function(v)DB().locked=v end) end,
-    })
-    L:step(8)
-    L:Row({
-        function(cell) cell:Slider("BaimiaoMarkerScale",T["标记助手缩放（%）"],70,140,5,function()return DB().scalePercent end,function(v)DB().scalePercent=v end,M.Refresh) end,
-        function(cell)
-            cell:step(18)
-            cell:Button(160,T["重置标记助手位置"],function()
-                if InCombatLockdown() then return end
-                local p=ns.GetLayoutDB("markerassist");p.x=nil;p.y=nil
-                if bar then position()end
-            end)
-        end,
-    }, 260)
+function M.AddOptionGroups(groups)
+    groups[#groups+1]={title=T["标记助手"],collapsed=true,
+        enabled=function()return DB().enabled end,setEnabled=function(v)DB().enabled=v;M.Refresh()end,
+        build=function(_,L)
+            L:Row({
+                function(cell) cell:Check(T["目标标记"],function()return DB().showTargets end,function(v)DB().showTargets=v end,M.Refresh) end,
+                function(cell) cell:Check(T["地面标记"],function()return DB().showWorlds end,function(v)DB().showWorlds=v end,M.Refresh) end,
+                function(cell) cell:Check(T["团队管理（就位 / 倒数）"],function()return DB().showManagement end,function(v)DB().showManagement=v end,M.Refresh) end,
+            })
+            L:Row({
+                function(cell) cell:Check(T["仅在小队 / 团队中显示"],function()return DB().groupOnly end,function(v)DB().groupOnly=v end,M.Refresh) end,
+                function(cell) cell:Check(T["仅队长显示"],function()return DB().leaderOnly end,function(v)DB().leaderOnly=v end,M.Refresh) end,
+                function(cell) cell:Check(T["锁定位置"],function()return DB().locked end,function(v)DB().locked=v end) end,
+            })
+            L:step(8)
+            L:Row({
+                function(cell) cell:Slider("BaimiaoMarkerScale",T["标记助手缩放（%）"],70,140,5,function()return DB().scalePercent end,function(v)DB().scalePercent=v end,M.Refresh) end,
+                function(cell)
+                    cell:step(18)
+                    cell:Button(160,T["重置标记助手位置"],function()
+                        if InCombatLockdown() then return end
+                        local p=ns.GetLayoutDB("markerassist");p.x=nil;p.y=nil
+                        if bar then position()end
+                    end)
+                end,
+            }, 260)
+        end}
 end
+
 events:SetScript("OnEvent",function(_,event)
     if event=="PLAYER_REGEN_DISABLED" then
         -- Do not invoke protected StopMoving/geometry changes after lockdown.

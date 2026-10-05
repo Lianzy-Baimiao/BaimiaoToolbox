@@ -180,11 +180,12 @@ end
 -- pcall 包住：能算就返回百分比与码/秒，算不出返回 nil（显示成 --）。
 local lastPct, lastYd = -1, -1  -- 缓存，配合 dirty 判定减少字符串重建
 
+local function ReadSpeedPercent()
+    local current = GetUnitSpeed("player") or 0
+    return math.floor(current / BASE_SPEED * 100 + 0.5), current
+end
 local function GetSpeedPercent()
-    local ok, pct, yd = pcall(function()
-        local current = GetUnitSpeed("player") or 0
-        return math.floor(current / BASE_SPEED * 100 + 0.5), current
-    end)
+    local ok, pct, yd = pcall(ReadSpeedPercent)
     if ok then lastPct, lastYd = pct, yd return pct, yd end
     return nil, nil
 end
@@ -197,8 +198,7 @@ local lastX, lastY = -1, -1
 local lastShownPct = -1
 local targetDirty = false
 
-local function DisplayDirty()
-    local _, px, py = GetPlayerPos()
+local function DisplayDirty(px, py)
     local x10 = px and math.floor(px * 1000 + 0.5) or -1
     local y10 = py and math.floor(py * 1000 + 0.5) or -1
     local dirty = x10 ~= lastX or y10 ~= lastY or targetDirty
@@ -347,8 +347,26 @@ local refreshWarned = false   -- 刷新里意外出错只提示一次，别把 B
 local function ApplyLook()
     if not button then return end
     local d = DB().display
+    button:SetScale(d.scale or 1)
     local fontPath = GameFontNormal:GetFont()
     ns.UI.SetRuntimeFont(button.text, fontPath, d.fontSize or 16)
+end
+
+local displayLines = {}
+-- Stable dispatch slot allows opt-in diagnostics to time the actual timer work.
+ns.IdleTasks = ns.IdleTasks or {}
+local displayTask = {}
+ns.IdleTasks.Coord = displayTask
+local function DisplayTick()
+    if displayActive and button and button:IsVisible() then displayTask.run() end
+end
+local function SetDisplayPolling(active)
+    if active then
+        if not displayTask.timer then displayTask.timer = C_Timer.NewTicker(0.1, DisplayTick) end
+    elseif displayTask.timer then
+        displayTask.timer:Cancel()
+        displayTask.timer = nil
+    end
 end
 
 local function UpdateDisplay()
@@ -356,21 +374,29 @@ local function UpdateDisplay()
     local d = DB().display
 
     if not ns.IsModuleEnabled(MODULE_ID) or not d.enabled then
+        SetDisplayPolling(false)
         button:Hide()
         return
     end
+    SetDisplayPolling(displayActive and (d.coord or d.speed or d.distance))
     button:Show()
-    button:SetScale(d.scale or 1)
 
-    -- 内容没变就跳过重排（0.1s 刷新下这能省掉绝大多数字符串/尺寸重建）。
-    local pct = GetSpeedPercent()
+    -- Sample only displayed data, once per update. Reuse the position for text.
+    local pct
+    if d.speed then pct = GetSpeedPercent() end
+    local x, y
+    if d.coord or (d.distance and UnitExists("target")) then
+        local map
+        map, x, y = GetPlayerPos()
+    end
     local speedChanged = (pct or -1) ~= lastShownPct
-    if pct then lastShownPct = pct end
-    if not speedChanged and not DisplayDirty() then return end
+    lastShownPct = pct or -1
+    local positionChanged = DisplayDirty(x, y)
+    if not speedChanged and not positionChanged then return end
 
-    local lines = {}
+    local lines = displayLines
+    wipe(lines)
     if d.coord then
-        local _, x, y = GetPlayerPos()
         local t = (x and y) and string.format(T["坐标 %.1f, %.1f"], x * 100, y * 100) or T["坐标 --"]
         lines[#lines + 1] = colorize(t, d.coordColor)
     end
@@ -391,6 +417,14 @@ local function UpdateDisplay()
     button.text:SetText(table.concat(lines, "\n"))
     button:SetSize(math.max(button.text:GetStringWidth() + 20, 90),
                     math.max(button.text:GetStringHeight() + 14, 24))
+end
+
+displayTask.run = function()
+    local ok, err = pcall(UpdateDisplay)
+    if not ok and not refreshWarned then
+        refreshWarned = true
+        ns.Print(T["坐标喊话：刷新出错（已继续运行）："] .. tostring(err))
+    end
 end
 
 local function CreateButton()
@@ -426,21 +460,6 @@ local function CreateButton()
         Announce()
     end)
 
-    local elapsed = 0
-    button:SetScript("OnUpdate", function(_, dt)
-        if not displayActive then return end
-        elapsed = elapsed + dt
-        if elapsed >= 0.1 then
-            elapsed = 0
-            -- 0.1s 刷一次：任何意外报错都会被放大成每秒 10 条 BugSack，所以兜一层 pcall，
-            -- 只在首次出错时提示一句（不静默吞掉问题，也不刷屏）。
-            local ok, err = pcall(UpdateDisplay)
-            if not ok and not refreshWarned then
-                refreshWarned = true
-                ns.Print(T["坐标喊话：刷新出错（已继续运行）："] .. tostring(err))
-            end
-        end
-    end)
 
     ApplyLook()
     return button
@@ -597,7 +616,8 @@ ns.RegisterModule({
         SetupSlash()
     end,
     OnDisable = function()
-        displayActive = false   -- 停 0.1s 刷新，关掉总开关后不再空转
+        displayActive = false
+        SetDisplayPolling(false)
         TeardownTargetEvent()   -- 同时也摘掉目标变化监听
         if button then button:Hide() end
     end,

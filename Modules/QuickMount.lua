@@ -685,6 +685,33 @@ local issecretvalue = issecretvalue or function() return false end
 local GetItemCooldownFn = (C_Container and C_Container.GetItemCooldown)
     or (C_Item and C_Item.GetItemCooldown) or GetItemCooldown
 
+local function ReadCooldownActive(info) return info.isActive end
+
+-- Cache only our successful public UI writes, never cooldown API results.
+-- The engine animates numeric cooldowns; unchanged inputs need no setter call.
+local function ClearExtraCooldown(cd)
+    if cd._bmCooldownClear then return end
+    cd:Clear()
+    cd._bmCooldownClear = true
+    cd._bmCooldownStart, cd._bmCooldownDuration = nil, nil
+end
+
+local function SetExtraNumericCooldown(cd, start, duration)
+    if cd._bmCooldownStart == start and cd._bmCooldownDuration == duration then return end
+    cd._bmCooldownClear = nil
+    cd._bmCooldownStart, cd._bmCooldownDuration = nil, nil
+    if pcall(cd.SetCooldown, cd, start, duration) then
+        cd._bmCooldownStart, cd._bmCooldownDuration = start, duration
+    end
+end
+
+local function SetExtraDurationObject(cd, object)
+    -- Opaque objects may change internally: never compare or retain them.
+    cd._bmCooldownClear = nil
+    cd._bmCooldownStart, cd._bmCooldownDuration = nil, nil
+    return pcall(cd.SetCooldownFromDurationObject, cd, object)
+end
+
 local function PaintCooldown(cd, e)
     if not cd then return end
 
@@ -697,9 +724,9 @@ local function PaintCooldown(cd, e)
         -- isActive 是 NeverSecret：能读到、且明确是 false，就说明确实不在冷却，直接清掉。
         -- 注意判断顺序：先 issecretvalue 再比 nil / 比 false，秘密值一旦参与比较就抛错。
         if info then
-            local ok, ia = pcall(function() return info.isActive end)
+            local ok, ia = pcall(ReadCooldownActive, info)
             if ok and not issecretvalue(ia) and ia ~= nil and ia == false then
-                cd:Clear()
+                ClearExtraCooldown(cd)
                 return
             end
         end
@@ -708,14 +735,14 @@ local function PaintCooldown(cd, e)
         if C_Spell and C_Spell.GetSpellCooldownDuration then
             local ok, durObj = pcall(C_Spell.GetSpellCooldownDuration, e.id)
             if ok and durObj then
-                if pcall(cd.SetCooldownFromDurationObject, cd, durObj) then return end
+                if SetExtraDurationObject(cd, durObj) then return end
             end
         end
         -- 退回：数值通道，先判秘密再比较（对秘密值做 > 会直接抛错）
         if info then
             local s, d = info.startTime, info.duration
             if not issecretvalue(s) and not issecretvalue(d) and d and d > 1.5 then
-                pcall(cd.SetCooldown, cd, s or 0, d)
+                SetExtraNumericCooldown(cd, s or 0, d)
                 return
             end
         end
@@ -727,23 +754,37 @@ local function PaintCooldown(cd, e)
         if durFn then
             local ok, durObj = pcall(durFn, e.id)
             if ok and durObj then
-                if pcall(cd.SetCooldownFromDurationObject, cd, durObj) then return end
+                if SetExtraDurationObject(cd, durObj) then return end
             end
         end
         if GetItemCooldownFn then
             local ok, s, d = pcall(GetItemCooldownFn, e.id)
             if ok and not issecretvalue(s) and not issecretvalue(d) and s and d and d > 1.5 then
-                pcall(cd.SetCooldown, cd, s, d)
+                SetExtraNumericCooldown(cd, s, d)
                 return
             end
         end
     end
 
-    cd:Clear()
+    ClearExtraCooldown(cd)
 end
 
 -- 安全按钮池：按钮只建一次（安全属性战斗中不能写、重建代价高），多余的隐藏备用。
 local extraButtons = {}
+
+-- Diagnostic dispatch only: no extra timer and no changes to secure handlers.
+ns.IdleTasks = ns.IdleTasks or {}
+local cooldownTask = {run=PaintCooldown, profileRefresh=true}
+ns.IdleTasks.QuickCooldown = cooldownTask
+
+-- Only entries with a cooldown get a callback; pooled macro buttons stay idle.
+local function UpdateExtraCooldown(self, dt)
+    if not self._entry then return end
+    self.cooldownElapsed = (self.cooldownElapsed or 0) + dt
+    if self.cooldownElapsed < 0.25 then return end
+    self.cooldownElapsed = 0
+    cooldownTask.run(self.cd, self._entry)
+end
 
 local function EnsureExtraButton(index)
     local b = extraButtons[index]
@@ -817,17 +858,6 @@ local function EnsureExtraButton(index)
         end
     end)
 
-    -- 冷却显示（节流刷新，避免每帧查询）。秘密环境下数值不可读，
-    -- PaintCooldown 内部会走 DurationObject 通道或直接不画，绝不把秘密值交给 SetCooldown。
-    local t = 0
-    b:SetScript("OnUpdate", function(self, dt)
-        local e = self._entry
-        if not e then return end
-        t = t + dt
-        if t < 0.25 then return end
-        t = 0
-        PaintCooldown(self.cd, e)
-    end)
 
     extraButtons[index] = b
     return b
@@ -972,6 +1002,10 @@ local function RebuildExtraButtons()
         local b = EnsureExtraButton(i)
         ApplySecureAttrs(b, entry)
         b._entry = entry
+        b.cooldownElapsed = 0
+        b:SetScript("OnUpdate", entry.kind ~= "macro" and UpdateExtraCooldown or nil)
+        -- An entry may have changed kind while reusing a secure button.
+        ClearExtraCooldown(b.cd)
         b.icon:SetTexture(entry.icon)
         b.label:SetText(ShortLabel(entry))
         b:ClearAllPoints()

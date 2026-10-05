@@ -18,6 +18,17 @@ local spent=0
 local queryTimes={}
 local quoteTaint=false
 local refresh=function()if A.RefreshUI then A.RefreshUI()end end
+-- Native AH item-data events arrive in bursts. Only the affected views need a
+-- repaint, once per batch; purchase/quote state transitions remain immediate.
+local itemRefreshQueued=false
+local function refreshItemData()
+    if itemRefreshQueued then return end
+    itemRefreshQueued=true
+    C_Timer.After(.05,function()
+        itemRefreshQueued=false
+        if started then refresh()end
+    end)
+end
 local nextItem,queryCurrent,readResults,purchasedSuccessfully
 local function reservations()
     local pc=ns.GetPCDB();pc.auctionhouseReservations=pc.auctionhouseReservations or {}
@@ -85,7 +96,7 @@ function A.ItemName(id)
     if not id then return nil end
     local name=read(C_Item and C_Item.GetItemInfo or GetItemInfo,id)
     if type(name)=="string" then return name end
-    if not requested[id]then
+    if requested[id]==nil then
         requested[id]=true;read(C_Item and C_Item.RequestLoadItemDataByID,id)
     end
     return T["物品 #"]..id
@@ -413,11 +424,35 @@ function A.HandleEvent(event,...)
     elseif event=="TRACKED_RECIPE_UPDATE" or event=="TRADE_SKILL_LIST_UPDATE" then
         A.Recipes.Invalidate()
         if A.purchaseSource=="recipes" and A.IsBusy()then A.Stop(T["追踪配方已更新；当前订单结束后请重新查询"])else refresh()end
-    elseif event=="BAG_UPDATE_DELAYED"then refresh()
+    elseif event=="BAG_UPDATE_DELAYED"then
+        if A.RefreshInventory then A.RefreshInventory()end
     elseif event=="ITEM_KEY_ITEM_INFO_RECEIVED" or event=="ITEM_DATA_LOAD_RESULT" or event=="GET_ITEM_INFO_RECEIVED"then
-        A.Recipes.Invalidate()
-        if quickRequest then local request=quickRequest;quickRequest=nil;searchEntry(request.entry,request.fromRestock)
-        elseif phase=="metadata" and current then readResults(current.id)else refresh()end
+        local itemID,success=...
+        itemID=A.ItemID(type(itemID)=="table" and itemID.itemID or itemID)
+        if not itemID then return end
+        local itemData=event~="ITEM_KEY_ITEM_INFO_RECEIVED"
+        local dirty=false
+        -- Observe only data requested by this helper, not every item loaded by
+        -- Blizzard's browse results (or another addon). Failures must not loop.
+        if itemData and requested[itemID]~=nil then
+            if success==false then requested[itemID]=false
+            else requested[itemID]=nil;dirty=true end
+        end
+        if itemData and success~=false and A.Recipes.InvalidateItem(itemID)then dirty=true end
+        if success~=false then
+            if quickRequest and quickRequest.entry.itemID==itemID then
+                -- An unrelated or still-incomplete event must not restart the
+                -- search timeout or allocate another stale timer callback.
+                local name=read(C_Item and C_Item.GetItemInfo or GetItemInfo,itemID)
+                if type(name)=="string"then
+                    local request=quickRequest;quickRequest=nil;searchEntry(request.entry,request.fromRestock)
+                end
+            elseif phase=="metadata" and current and current.id==itemID then
+                local metadata=read(api().GetItemKeyInfo,current.key)
+                if type(metadata)=="table" and metadata.isCommodity~=nil then readResults(itemID)end
+            end
+        end
+        if dirty then refreshItemData()end
     elseif event=="PLAYER_REGEN_ENABLED"then refresh()end
 end
 local hooksInstalled=false

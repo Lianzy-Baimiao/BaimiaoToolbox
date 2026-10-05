@@ -43,7 +43,7 @@ Feature settings are account-wide; frame positions and lock settings are saved p
 
 Install the addon for your **Retail** game instance. For manual installation, place the **BaimiaoToolbox** folder in `World of Warcraft/_retail_/Interface/AddOns/`, with `BaimiaoToolbox.toc` directly inside it.
 
-When upgrading to **1.9.17**, fully exit the game before installation and restart it afterward to load the new localization files. Keep your SavedVariables; no settings reset is required.
+When upgrading to **1.9.18**, fully exit the game before installation and restart it afterward to load the new diagnostic file. Keep your SavedVariables; no settings reset is required.
 
 ## Compatibility and limits
 
@@ -112,7 +112,7 @@ The addon's own code is MIT-licensed; see LICENSE. The bundled modified LibDefla
 
 请安装到**正式服**客户端。手动安装时，将 **BaimiaoToolbox** 文件夹放入 `World of Warcraft/_retail_/Interface/AddOns/`，确保 `BaimiaoToolbox.toc` 直接位于该文件夹内。
 
-升级到 **1.9.17** 时，请完全退出游戏后安装，再重新进入，以加载新增语言文件。保留 SavedVariables，无需清空或重置设置。
+升级到 **1.9.18** 时，请完全退出游戏后安装，再重新进入，以加载新增诊断文件。保留 SavedVariables，无需清空或重置设置。
 
 ### 兼容性与限制
 
@@ -131,3 +131,11 @@ The addon's own code is MIT-licensed; see LICENSE. The bundled modified LibDefla
 源码与发布：https://github.com/Lianzy-Baimiao/BaimiaoToolbox
 
 插件自有代码采用 MIT 许可证，详见 LICENSE；内嵌的私有修改版 LibDeflate 保留 zlib 许可证，完整声明及署名位于 `Libs/KeystoneDeflate.lua`。
+
+## 1.9.18 — Settings and resource usage / 设置与资源占用
+
+Settings pages now load on demand, with reorganized groups and clearer save behavior. Auction item-data updates are coalesced and filtered to reduce unnecessary rebuilds. Background refreshes reduce redundant work without a promised fixed CPU or memory target.
+
+设置页改为按需创建，重新整理分组与保存提示。拍卖行物品数据更新合并处理并过滤无关事件，减少不必要的界面重建；后台刷新减少重复工作，不承诺固定 CPU 降幅或内存上限。
+
+**Optional diagnostics / 可选诊断:** Run /bmperf out of combat for a 30-second sample; /bmperf cancel stops it. It reports native recent metrics and selected callbacks, not complete per-module CPU usage. Profiling is opt-in and results are not persisted. 脱战时运行 /bmperf 采样 30 秒，/bmperf cancel 取消；仅覆盖部分回调，不是完整模块 CPU 排行，诊断结果不写入存档。

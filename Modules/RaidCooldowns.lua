@@ -79,8 +79,20 @@ local function IsSecret(value)
     return issecretvalue and issecretvalue(value)
 end
 
-local function ReadAuras(ids, now)
+-- Cache only successful negative queries out of combat; never retain aura objects
+-- or secret/unknown results. Player/world events invalidate immediately; a one
+-- second fallback bounds recovery if an event is missed.
+local absentLustUntil, absentSatedUntil
+local function InvalidateAuraAbsence()
+    absentLustUntil, absentSatedUntil = nil, nil
+end
+
+local function ReadAuras(ids, now, cacheAbsence)
     if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return -1 end
+    local deadline
+    if ids == LUST_SPELLS then deadline = absentLustUntil else deadline = absentSatedUntil end
+    if cacheAbsence and deadline and now < deadline then return 0 end
+    if ids == LUST_SPELLS then absentLustUntil = nil else absentSatedUntil = nil end
     local missing = 0
     for _, sid in ipairs(ids) do
         local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
@@ -100,6 +112,9 @@ local function ReadAuras(ids, now)
             end
         end
     end
+    if missing == 0 and cacheAbsence then
+        if ids == LUST_SPELLS then absentLustUntil = now + 1 else absentSatedUntil = now + 1 end
+    end
     return missing
 end
 
@@ -109,9 +124,17 @@ local worldLeaving = false
 local lustState = { active = false }
 local lastTriggerSource, lastTriggerAt
 
+-- This private sample has no external owners; reuse it rather than allocate on
+-- every poll. Clear all optional fields so an expired aura cannot leave a timer.
+local function ClearLustState()
+    wipe(lustState)
+    lustState.active = false
+end
+
 local function ResetLustTracking()
+    InvalidateAuraAbsence()
     satedPrevious, guessUntil, guessContext = nil, nil, nil
-    lustState = { active = false }
+    ClearLustState()
 end
 
 -- 备用窗口只在副本内有效；野外只认真实可读的增益，不能由疲惫推断正在嗜血。
@@ -122,19 +145,62 @@ local function GuessContext()
     if inside == true and (kind == "party" or kind == "raid") then return kind end
 end
 
+-- A public, unrelated incremental update need not invalidate the whole sample.
+-- Do not retain aura objects/instance IDs or guess what a removed aura was.
+local watchedAuras = {}
+for _, id in ipairs(LUST_SPELLS) do watchedAuras[id] = true end
+for _, id in ipairs(SATED_DEBUFFS) do watchedAuras[id] = true end
+
+local function IsUnrelatedAura(aura)
+    if IsSecret(aura) or type(aura) ~= "table" then return false end
+    local id = aura.spellId
+    return not IsSecret(id) and type(id) == "number" and not watchedAuras[id]
+end
+
+local function IsUnrelatedAuraUpdate(info)
+    -- Preserve combat and instance edge inference without filtering.
+    if InCombatLockdown() or GuessContext() then return false end
+    if IsSecret(info) or type(info) ~= "table" then return false end
+    local full = info.isFullUpdate
+    if IsSecret(full) or full ~= false then return false end
+    local removed, added, updated = info.removedAuraInstanceIDs, info.addedAuras, info.updatedAuraInstanceIDs
+    if IsSecret(removed) or IsSecret(added) or IsSecret(updated) then return false end
+    if removed ~= nil and (type(removed) ~= "table" or next(removed) ~= nil) then return false end
+    if added ~= nil then
+        if type(added) ~= "table" then return false end
+        for _, aura in ipairs(added) do
+            if not IsUnrelatedAura(aura) then return false end
+        end
+    end
+    if updated ~= nil then
+        if type(updated) ~= "table" then return false end
+        -- Large batches are cheaper/safer to handle through the existing scan.
+        if #updated > 4 then return false end
+        local lookup = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
+        for _, id in ipairs(updated) do
+            if IsSecret(id) or type(id) ~= "number" or not lookup then return false end
+            if not IsUnrelatedAura(lookup("player", id)) then return false end
+        end
+    end
+    return true
+end
+
 local function SampleLust()
     if worldLeaving then
-        lustState = { active = false }
+        ClearLustState()
         return lustState
     end
     local now = GetTime()
     local context = GuessContext()
     if guessContext ~= context then
+        InvalidateAuraAbsence()
         -- 不依赖世界事件一定早于下一次轮询：出本立即清除推定，进本重新建基线。
         satedPrevious, guessUntil = nil, nil
         guessContext = context
     end
-    local sated, satedExp, satedStart = ReadAuras(SATED_DEBUFFS, now)
+    -- Keep dungeon/raid edge inference and combat polling uncached.
+    local cacheAbsence = not context and not InCombatLockdown()
+    local sated, satedExp, satedStart = ReadAuras(SATED_DEBUFFS, now, cacheAbsence)
     local freshSated = satedPrevious == 0 and sated == 1
     -- 首次采样只建立基线；未知采样也会打断“确认没有 -> 新出现”的证据链。
     satedPrevious = sated
@@ -147,9 +213,12 @@ local function SampleLust()
     end
     if guessUntil and guessUntil <= now then guessUntil = nil end
 
-    local state = { active = false, sated = sated, satedExp = satedExp }
+    local wasActive = lustState.active
+    ClearLustState()
+    local state = lustState
+    state.sated, state.satedExp = sated, satedExp
     if not dead then
-        local buff, buffExp = ReadAuras(LUST_SPELLS, now)
+        local buff, buffExp = ReadAuras(LUST_SPELLS, now, cacheAbsence)
         if buff == 1 then
             state.active, state.endsAt, state.source = true, buffExp, T["嗜血增益"]
             -- 读得到实际结束时间时缩短备用窗口，不把推定计时延长到真实增益之后。
@@ -159,12 +228,14 @@ local function SampleLust()
             state.estimated = true
         end
     end
-    if state.active and not lustState.active then
+    if state.active and not wasActive then
         lastTriggerSource, lastTriggerAt = state.source, now
     end
-    lustState = state
     return state
 end
+
+local ACTIVE_COLOR, WAIT_COLOR = { 1, 0.85, 0.1 }, { 0.75, 0.75, 0.75 }
+local READY_COLOR, EMPTY_COLOR = { 0.2, 1, 0.4 }, { 1, 0.3, 0.3 }
 
 local function GetLustDisplay(state)
     if state.active then
@@ -173,17 +244,17 @@ local function GetLustDisplay(state)
             text = (state.estimated and T["嗜血中 约%.0f秒"] or T["嗜血中 %.0f秒"]):format(
                 math.max(0, state.endsAt - GetTime()))
         end
-        return text, { 1, 0.85, 0.1 }
+        return text, ACTIVE_COLOR
     elseif state.sated == 1 then
         if state.satedExp then
             local left = math.max(0, state.satedExp - GetTime())
-            return (T["冷却 %d:%02d"]):format(math.floor(left / 60), math.floor(left % 60)), { 0.75, 0.75, 0.75 }
+            return (T["冷却 %d:%02d"]):format(math.floor(left / 60), math.floor(left % 60)), WAIT_COLOR
         end
-        return T["冷却中"], { 0.75, 0.75, 0.75 }
+        return T["冷却中"], WAIT_COLOR
     elseif state.sated == -1 then
-        return T["状态暂不可读"], { 0.75, 0.75, 0.75 }
+        return T["状态暂不可读"], WAIT_COLOR
     end
-    return T["准备就绪"], { 0.2, 1, 0.4 }
+    return T["准备就绪"], READY_COLOR
 end
 
 -- 各职业自带的战复法术（单人/小队时读自己这只）。
@@ -250,9 +321,9 @@ local function GetBrezState()
         -- 组着队却读不到共享池（例如野外小队）：显示「?」而不是「无」，
         -- 避免把"读不到"说成"没有战复"（模块里其它读不到的值也用「--/?」这种写法）。
         if IsInGroup() and not IsInRaid() then
-            return T["战复：?"], { 0.75, 0.75, 0.75 }
+            return T["战复：?"], WAIT_COLOR
         end
-        return T["战复：无"], { 0.75, 0.75, 0.75 }
+        return T["战复：无"], WAIT_COLOR
     end
 
     local txt = T["战复："] .. charges
@@ -262,7 +333,7 @@ local function GetBrezState()
             txt = txt .. (" (%d:%02d)"):format(math.floor(left / 60), math.floor(left % 60))
         end
     end
-    local col = (charges <= 0) and { 1, 0.3, 0.3 } or { 0.2, 1, 0.4 }
+    local col = (charges <= 0) and EMPTY_COLOR or READY_COLOR
     return txt, col
 end
 
@@ -438,6 +509,28 @@ end
 
 local frame
 local pollActive = false      -- 0.25s 轮询开关；模块关闭时停掉避免空转
+local pollFrame
+ns.IdleTasks = ns.IdleTasks or {}
+local pollTask = {}
+ns.IdleTasks.RaidCD = pollTask
+local function PollTick()
+    if pollActive then pollTask.run() end
+end
+local function SetPolling(active)
+    pollActive = active and true or false
+    if not pollFrame then return end
+    pollFrame:SetShown(pollActive)
+    if pollActive then
+        if not pollTask.timer then pollTask.timer = C_Timer.NewTicker(0.25, PollTick) end
+        if pollFrame.RegisterUnitEvent then pollFrame:RegisterUnitEvent("UNIT_AURA", "player")
+        else pollFrame:RegisterEvent("UNIT_AURA") end
+    else
+        if pollTask.timer then pollTask.timer:Cancel(); pollTask.timer = nil end
+        pollFrame:UnregisterEvent("UNIT_AURA")
+    end
+end
+local layoutDirty = true
+local layoutLust, layoutBrez, layoutSize
 
 local function ApplyLockVisual()
     if not frame then return end
@@ -449,6 +542,7 @@ end
 -- 按字号重排：图标 = 字高，图标在左、文字在右，两行左对齐。
 local function ApplyLook()
     if not frame then return end
+    layoutDirty = true
     local size = DB().fontSize or 16
     local fontPath = GameFontNormal:GetFont()
     for _, row in ipairs(frame.rows) do
@@ -457,6 +551,22 @@ local function ApplyLook()
     end
     frame.rows[1]:SetHeight(size + 2)
     frame.rows[2]:SetHeight(size + 2)
+end
+
+local function UpdateRow(row, text, color)
+    local changed = row.text:GetText() ~= text
+    if changed then row.text:SetText(text) end
+    if row.displayColor ~= color then
+        row.text:SetTextColor(color[1], color[2], color[3])
+        row.displayColor = color
+    end
+    -- Runtime appearance may change the font without going through ApplyLook.
+    local path, size, flags = row.text:GetFont()
+    if row.displayFont ~= path or row.displaySize ~= size or row.displayFlags ~= flags then
+        row.displayFont, row.displaySize, row.displayFlags = path, size, flags
+        changed = true
+    end
+    return changed
 end
 
 local function UpdateDisplay()
@@ -487,31 +597,40 @@ local function UpdateDisplay()
 
     -- 第一行：嗜血
     local lustTxt, lustCol = GetLustDisplay(state)
-    frame.rows[1].text:SetText(lustTxt)
-    frame.rows[1].text:SetTextColor(lustCol[1], lustCol[2], lustCol[3])
+    local changed = UpdateRow(frame.rows[1], lustTxt, lustCol)
     -- 第二行：战复
     if d.showBrez then
         frame.rows[2]:Show()
         local brezTxt, brezCol = GetBrezState()
-        frame.rows[2].text:SetText(brezTxt)
-        frame.rows[2].text:SetTextColor(brezCol[1], brezCol[2], brezCol[3])
+        if UpdateRow(frame.rows[2], brezTxt, brezCol) then changed = true end
     else
         frame.rows[2]:Hide()
     end
 
-    -- 按内容自适应宽度
-    frame.rows[2]:ClearAllPoints()
-    if showLust then
-        frame.rows[2]:SetPoint("TOPLEFT", frame.rows[1], "BOTTOMLEFT", 0, -2)
-    else
-        frame.rows[2]:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -4)
+    -- Keep polling aura/music state, but only lay out changed display content.
+    local size = d.fontSize or 16
+    if layoutLust ~= showLust or layoutBrez ~= d.showBrez or layoutSize ~= size then
+        layoutDirty = true
     end
-    frame.rows[2]:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
+    if not changed and not layoutDirty then return end
+    if layoutDirty then
+        frame.rows[2]:ClearAllPoints()
+        if showLust then
+            frame.rows[2]:SetPoint("TOPLEFT", frame.rows[1], "BOTTOMLEFT", 0, -2)
+        else
+            frame.rows[2]:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -4)
+        end
+        frame.rows[2]:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
+        frame:SetHeight(((showLust and 1 or 0) + (d.showBrez and 1 or 0)) * (size + 4) + 8)
+        layoutLust, layoutBrez, layoutSize = showLust, d.showBrez, size
+        layoutDirty = false
+    end
     local w1 = showLust and (frame.rows[1].icon:GetWidth() + 4 + frame.rows[1].text:GetStringWidth()) or 0
     local w2 = d.showBrez and (frame.rows[2].icon:GetWidth() + 4 + frame.rows[2].text:GetStringWidth()) or 0
     frame:SetWidth(math.max(w1, w2, 60) + 12)
-    frame:SetHeight(((showLust and 1 or 0) + (d.showBrez and 1 or 0)) * ((d.fontSize or 16) + 4) + 8)
 end
+
+pollTask.run = UpdateDisplay
 
 local function CreateRow(parent, spellID)
     local row = CreateFrame("Frame", nil, parent)
@@ -559,19 +678,26 @@ local function CreateFrameOnce()
     frame.rows[2]:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
 
     -- 0.25s 刷新，倒计时够顺滑又不费。模块关闭时由 OnDisable 停掉。
-    pollActive = true
-    local acc = 0
     -- 音乐独立轮询，不依附可见监控框。玩家光环事件用于及时捕获疲惫的移除/新获得。
     local poll = CreateFrame("Frame", "BaimiaoRaidCDPoll", UIParent)
-    poll:RegisterEvent("UNIT_AURA")
+    pollFrame = poll
+    SetPolling(ns.IsModuleEnabled(MODULE_ID) and DB().enabled)
     poll:RegisterEvent("PLAYER_ENTERING_WORLD")
     poll:RegisterEvent("PLAYER_LEAVING_WORLD")
     poll:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     poll:RegisterEvent("PLAYER_DEAD")
-    poll:SetScript("OnEvent", function(_, event, unit)
+    poll:RegisterEvent("PLAYER_REGEN_DISABLED")
+    poll:RegisterEvent("PLAYER_REGEN_ENABLED")
+    poll:SetScript("OnEvent", function(_, event, unit, updateInfo)
         -- 即使模块在载入期间关闭，也不能把离开世界的标记留到再次启用。
         if event == "PLAYER_ENTERING_WORLD" then worldLeaving = false end
         if not pollActive or (event == "UNIT_AURA" and unit ~= "player") then return end
+        if event == "UNIT_AURA" then
+            -- Any restricted field or failed lookup falls back, never suppresses.
+            local ok, unrelated = pcall(IsUnrelatedAuraUpdate, updateInfo)
+            if ok and unrelated then return end
+        end
+        InvalidateAuraAbsence()
         if event == "PLAYER_LEAVING_WORLD" then
             worldLeaving = true
             ResetLustSession()
@@ -582,11 +708,6 @@ local function CreateFrameOnce()
             ResetLustSession()
         end
         UpdateDisplay()
-    end)
-    poll:SetScript("OnUpdate", function(_, dt)
-        if not pollActive then return end
-        acc = acc + dt
-        if acc >= 0.25 then acc = 0 UpdateDisplay() end
     end)
 
     ApplyLook()
@@ -608,73 +729,73 @@ end
 
 local function BuildOptions(panel,m,L)
     L:Title(T["嗜血 / 战复监控"])
-    L:Text(T["显示场景与音乐分开配置；试听只在本机播放。"],true)
     m.optionTabs=ns.UI.OptionTabs(panel,L,{
-        {name=T["显示与场景"],width=150,build=function(panel,L)
-    L:Section(T["显示"])
-    L:Check(T["显示嗜血行"], function() return DB().showLust ~= false end,
-        function(v) DB().showLust = v end, Refresh)
-    L:Check(T["显示战复行"], function() return DB().showBrez end,
-        function(v) DB().showBrez = v end, Refresh)
-    L:Text(T["两行可分别开关；全部关闭时隐藏监控框，嗜血音乐仍由音乐页独立控制。"],true)
-    L:Check(T["锁定位置（锁定后隐藏背景、不能拖动；Alt+左键仍可拖）"],
-        function() return LayoutDB().locked end,
-        function(v) LayoutDB().locked = v end, Refresh)
-
-    L:Section(T["在哪些情况下显示"])
-    L:Check(T["单人时显示"], function() return DB().showSolo end,
-        function(v) DB().showSolo = v end, Refresh)
-    L:Check(T["小队时显示"], function() return DB().showParty end,
-        function(v) DB().showParty = v end, Refresh)
-    L:Check(T["团队时显示"], function() return DB().showRaid end,
-        function(v) DB().showRaid = v end, Refresh)
-    L:Slider("BaimiaoRaidCDFontSlider", T["字号"], 10, 40, 1,
-        function() return DB().fontSize or 16 end,
-        function(v) DB().fontSize = v end, Refresh)
-
-    L:Text(T["提示：团队里读共享战复池；单人/小队里读你自己职业的战复（惩戒骑=代祷，不在CD就是1）。"] ..
-        T["自己职业没有战复时显示「战复：无」，不会误报 1 次。"] ..
-        T["嗜血判定已内置常见变体（嗜血/英勇/时间扭曲/亲龙之赐/原始狂暴）。"] ..
-        T["锁定后可用 Alt+右键 打开本设置。"], true)
+        {name=T["监控显示"],width=150,build=function(panel,L,onResize)
+            L:Section(T["监控内容与场景"])
+            L:Row({
+                function(c)c:Check(T["显示嗜血行"],function()return DB().showLust~=false end,
+                    function(v)DB().showLust=v end,Refresh)end,
+                function(c)c:Check(T["显示战复行"],function()return DB().showBrez end,
+                    function(v)DB().showBrez=v end,Refresh)end,
+            },260)
+            L:Text(T["关闭两行只隐藏监控条，不影响嗜血音乐。"],true)
+            L:Row({
+                function(c)c:Check(T["单人时显示"],function()return DB().showSolo end,
+                    function(v)DB().showSolo=v end,Refresh)end,
+                function(c)c:Check(T["小队时显示"],function()return DB().showParty end,
+                    function(v)DB().showParty=v end,Refresh)end,
+                function(c)c:Check(T["团队时显示"],function()return DB().showRaid end,
+                    function(v)DB().showRaid=v end,Refresh)end,
+            })
+            L:Section(T["外观与位置"])
+            L:Row({
+                function(c)c:Slider("BaimiaoRaidCDFontSlider",T["字号"],10,40,1,
+                    function()return DB().fontSize or 16 end,function(v)DB().fontSize=v end,Refresh)end,
+                function(c)c:Check(T["锁定位置"],function()return LayoutDB().locked end,
+                    function(v)LayoutDB().locked=v end,Refresh)
+                    c:Button(180,T["重置监控条位置"],function()
+                        local d=LayoutDB();d.point,d.relPoint,d.x,d.y="CENTER","CENTER",0,60;Refresh()
+                    end)
+                end,
+            },280)
+            L:Text(T["锁定后隐藏背景；Alt + 左键拖动，Alt + 右键打开设置。"],true)
+            m.monitorHelp=ns.UI.OptionGroups(panel,L,{{title=T["监控说明"],collapsed=true,build=function(_,c)
+                c:Text(T["团队中显示共享战复次数；单人或小队中显示自身战复。没有战复技能时显示“无”。"],true)
+                c:Text(T["嗜血判定已内置常见变体（嗜血/英勇/时间扭曲/亲龙之赐/原始狂暴）。"],true)
+            end}},onResize)
         end},
-        {name=T["音乐与试听"],width=150,build=function(panel,L)
-    L:Section(T["嗜血音乐"])
-    L:Check(T["嗜血触发时播放音乐"],
-        function() return DB().music.enabled end,
-        function(v) DB().music.enabled = v end)
-    -- 声音下拉：悬停某项即试听（previewFn）。
-    L:Dropdown(300, T["音乐："], SoundList,
-        function() return DB().music.sound end,
-        function(v) DB().music.sound = v end,
-        nil,
-        function(v) PreviewMusic(v) end)
-    L:Dropdown(200, T["声道："], ns.UI.ListFrom(SOUND_CHANNELS, CHANNEL_LABEL),
-        function() return DB().music.channel or "Master" end,
-        function(v) DB().music.channel = v end)
-    L:Text(T["悬停音乐列表可试听；自定义路径和循环间隔在右侧页面设置。"],true)
-    local tryBtn = L:Button(120, T["试听"], function() PreviewMusic(nil, true) end)
-    L:Button(120, T["停止"], function() StopLustMusic() end, true, tryBtn)
-
-
-        end},
-        {name=T["循环与自定义"],width=150,build=function(panel,L)
-    L:Section(T["高级音乐设置"])
-    L:Check(T["嗜血持续期间循环播放"],
-        function() return DB().music.loop end,
-        function(v) DB().music.loop = v end)
-    L:Slider("BaimiaoRaidCDLoopSlider", T["循环间隔(秒)"], 1, 30, 1,
-        function() return DB().music.loopInterval or 3 end,
-        function(v) DB().music.loopInterval = v end)
-    L:Text(T["循环间隔建议设成你音频的实际长度，衔接最顺。悬停上面的音乐下拉项可直接试听。"], true)
-    L:Text(T["声道对单次播放和循环播放都生效（循环用的是定时重播 PlaySoundFile）。"], true)
-    L:Text(T["自定义路径 / fileDataID（音乐下拉选“自定义路径…”时用）："], true)
-    L:Box(460, 22, false,
-        function() return DB().music.file end,
-        function(v) DB().music.file = (v or ""):gsub("^%s+", ""):gsub("%s+$", "") end)
-    local tryBtn = L:Button(120, T["试听"], function() PreviewMusic(nil, true) end)
-    L:Button(120, T["停止"], function() StopLustMusic() end, true, tryBtn)
-
-
+        {name=T["嗜血音乐"],width=150,build=function(panel,L,onResize)
+            L:Check(T["嗜血触发时播放音乐"],function()return DB().music.enabled end,function(v)
+                DB().music.enabled=v;if not v then StopLustMusic()end
+            end,function()L:SyncAll()end)
+            local function musicEnabled()return DB().music.enabled end
+            m.musicGroups=ns.UI.OptionGroups(panel,L,{
+                {title=T["音乐与试听"],visible=musicEnabled,build=function(_,c)
+                    c:Row({
+                        function(cell)cell:Dropdown(320,T["音乐："],SoundList,
+                            function()return DB().music.sound end,function(v)DB().music.sound=v end,
+                            function()L:SyncAll()end,function(v)PreviewMusic(v)end)end,
+                        function(cell)cell:Dropdown(260,T["声道："],ns.UI.ListFrom(SOUND_CHANNELS,CHANNEL_LABEL),
+                            function()return DB().music.channel or "Master" end,function(v)DB().music.channel=v end)end,
+                    },280)
+                    local play=c:Button(120,T["试听"],function()
+                        ns.UI.CommitOptionsFocus(panel);PreviewMusic(nil,true)
+                    end)
+                    c:Button(120,T["停止"],StopLustMusic,true,play)
+                    c:Text(T["试听仅在本机播放；也可悬停音乐列表试听。"],true)
+                end},
+                {title=T["自定义路径 / fileDataID"],visible=function()return musicEnabled() and DB().music.sound=="__custom__"end,
+                    build=function(_,c)
+                        c:Box(500,28,false,function()return DB().music.file end,
+                            function(v)DB().music.file=(v or ""):gsub("^%s+",""):gsub("%s+$","")end)
+                    end},
+                {title=T["嗜血持续期间循环播放"],visible=musicEnabled,enabled=function()return DB().music.loop end,
+                    setEnabled=function(v)DB().music.loop=v end,build=function(_,c)
+                        c:Slider("BaimiaoRaidCDLoopSlider",T["循环间隔(秒)"],1,30,1,
+                            function()return DB().music.loopInterval or 3 end,function(v)DB().music.loopInterval=v end)
+                        c:Text(T["间隔建议与音频长度一致；声道设置对循环同样生效。"],true)
+                    end},
+            },onResize)
         end},
     })
 end
@@ -721,14 +842,14 @@ ns.RegisterModule({
         UpdateDisplay()
     end,
     OnDisable = function()
-        pollActive = false
+        SetPolling(false)
         if frame then frame:Hide() end
         ResetLustSession()
     end,
     OnToggle = function(_, on)
         if on then
             ResetLustSession()
-            pollActive = true
+            SetPolling(DB().enabled)
         end
         Refresh()
     end,
