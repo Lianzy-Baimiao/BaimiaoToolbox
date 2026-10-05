@@ -76,23 +76,37 @@ local function GetRangeLib()
     return rangeLib or nil
 end
 
--- 12.x 起 IsItemInRange / UnitInRange 这类测距接口可能是“受保护函数”：从插件（非硬件
--- 事件）路径调用会触发 ADDON_ACTION_BLOCKED，被 BugSack 逐条抓下来刷屏——而且这不是
--- Lua 报错，pcall 拦不住。策略：监听 ADDON_ACTION_BLOCKED，一旦发现本插件“刚发起测距、
--- 随即被系统拦截”，就永久停用测距（本次登录 + 按客户端版本持久化），距离退回“未知区间”，
--- 不再撞墙。这样最多在换版本后的首个目标上留一条拦截记录，之后彻底安静。
-local rangeBlocked = false     -- 被系统拦截过就置真，之后不再调用受保护测距接口
-local rangeProbeAt = 0         -- 最近一次测距尝试的时间戳，用来认领“紧随其后”的拦截
-
-local function CurBuild() return select(4, GetBuildInfo()) end
-
+-- Check eligibility before calling a potentially protected item-range API.
+-- An unexpected block quarantines only this context for this login, not the
+-- whole client build forever. Never turn a secret attackability value into a boolean.
+local blockedRangeContexts = {}
+local rangeProbeAt, rangeProbeContext = -1, nil
+local function IsSecret(value)
+    return issecretvalue and issecretvalue(value)
+end
+local function ReadRangeContext(unit)
+    local restricted = InCombatLockdown()
+    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive then
+        local challenge = C_ChallengeMode.IsChallengeModeActive()
+        if IsSecret(challenge) then return nil end
+        restricted = restricted or challenge
+    end
+    local canAttack = UnitCanAttack and UnitCanAttack("player", unit)
+    if IsSecret(canAttack) then return nil end
+    if restricted and canAttack ~= true then return nil end
+    return restricted and "restricted-hostile" or (canAttack == true and "open-hostile" or "open-other")
+end
+local function RangeContext(unit)
+    local ok, context = pcall(ReadRangeContext, unit)
+    return ok and context or nil
+end
 local blockWatcher = CreateFrame("Frame")
-blockWatcher:RegisterEvent("ADDON_ACTION_BLOCKED")
-blockWatcher:SetScript("OnEvent", function(_, _, addon)
-    -- 只认领“刚发起过测距、随即到来的本插件拦截”，别把别的模块的拦截也算到测距头上。
-    if addon == ADDON and (GetTime() - rangeProbeAt) < 0.5 then
-        rangeBlocked = true
-        DB().rangeBlockedBuild = CurBuild()   -- 记下是哪个客户端版本封的，换版本会自动重试一次
+blockWatcher:SetScript("OnEvent", function(_, _, addon, functionName)
+    if IsSecret(addon) or IsSecret(functionName) then return end
+    if addon == ADDON and type(functionName) == "string"
+        and functionName:find("IsItemInRange", 1, true)
+        and rangeProbeContext and (GetTime() - rangeProbeAt) < 0.5 then
+        blockedRangeContexts[rangeProbeContext] = true
     end
 end)
 
@@ -114,17 +128,20 @@ local HARM_ORDER = { 5, 8, 10, 20, 25, 30, 35, 40 }
 
 -- 返回 minRange, maxRange（数字，码）。测不出返回 nil。
 local function GetTargetRange(unit)
-    -- 系统已拦截过测距：彻底停用，避免 0.1s 刷新一直撞受保护函数刷屏。
-    if rangeBlocked then return nil end
-    rangeProbeAt = GetTime()   -- 标记：紧随其后的本插件 ADDON_ACTION_BLOCKED 认作测距被拦
+    local context = RangeContext(unit)
+    if not context or blockedRangeContexts[context] then return nil end
+    rangeProbeAt, rangeProbeContext = GetTime(), context
 
     local lib = GetRangeLib()
     if lib then
         -- 库的检查器在 12.x 可能撞上秘密值而报错：出错就退回下面的内置兜底，
         -- 不让 0.1s 一次的刷新跟着炸。
         local ok, minR, maxR = pcall(lib.GetRange, lib, unit, true)
-        if ok and (type(minR) == "number" or type(maxR) == "number") then
-            return minR, maxR
+        if blockedRangeContexts[context] then return nil end
+        if ok then
+            if IsSecret(minR) or type(minR) ~= "number" then minR = nil end
+            if IsSecret(maxR) or type(maxR) ~= "number" then maxR = nil end
+            if minR or maxR then return minR, maxR end
         end
     end
 
@@ -134,7 +151,9 @@ local function GetTargetRange(unit)
     for _, yards in ipairs(HARM_ORDER) do
         local item = HARM_ITEMS[yards]
         if item then
-            local inRange = C_Item.IsItemInRange(item, unit)
+            local ok, inRange = pcall(C_Item.IsItemInRange, item, unit)
+            if blockedRangeContexts[context] then return nil end
+            if not ok or IsSecret(inRange) then inRange = nil end
             if inRange == true then
                 -- prev 还是 0 说明更近的档都没测出来（物品失效）：只给上界，
                 -- 让 RangeString 显示成 "<40码"，比 "0-40码" 诚实也好读。
@@ -197,6 +216,8 @@ end
 local lastX, lastY = -1, -1
 local lastShownPct = -1
 local targetDirty = false
+local cachedRange
+local nextRangeAt = 0
 
 local function DisplayDirty(px, py)
     local x10 = px and math.floor(px * 1000 + 0.5) or -1
@@ -210,16 +231,23 @@ end
 local function ForceDirty()
     lastX, lastY, lastShownPct = -1, -1, -1
     targetDirty = true
+    nextRangeAt = 0
 end
 
 -- 目标变化事件：置脏标记，下次刷新就会重建（不读 guid，规避秘密值）。
 -- 注册/注销跟着模块总开关走，关掉后不再白收事件。
 local targetEv = CreateFrame("Frame")
-targetEv:SetScript("OnEvent", function() targetDirty = true end)
 local function SetupTargetEvent()
+    blockWatcher:RegisterEvent("ADDON_ACTION_BLOCKED")
     targetEv:RegisterEvent("PLAYER_TARGET_CHANGED")
+    targetEv:RegisterEvent("PLAYER_STARTED_MOVING")
+    targetEv:RegisterEvent("PLAYER_STOPPED_MOVING")
+    targetEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+    targetEv:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    targetEv:RegisterEvent("ZONE_CHANGED")
 end
 local function TeardownTargetEvent()
+    blockWatcher:UnregisterAllEvents()
     targetEv:UnregisterAllEvents()
 end
 
@@ -360,12 +388,20 @@ ns.IdleTasks.Coord = displayTask
 local function DisplayTick()
     if displayActive and button and button:IsVisible() then displayTask.run() end
 end
-local function SetDisplayPolling(active)
+local displayInterval
+local sampledX, sampledY
+local movementWake = false
+local function SetDisplayPolling(active, interval)
+    interval = interval or 0.1
     if active then
-        if not displayTask.timer then displayTask.timer = C_Timer.NewTicker(0.1, DisplayTick) end
+        if displayTask.timer and displayInterval == interval then return end
+        if displayTask.timer then displayTask.timer:Cancel() end
+        displayInterval = interval
+        displayTask.timer = C_Timer.NewTicker(interval, DisplayTick)
     elseif displayTask.timer then
         displayTask.timer:Cancel()
         displayTask.timer = nil
+        displayInterval = nil
     end
 end
 
@@ -378,7 +414,6 @@ local function UpdateDisplay()
         button:Hide()
         return
     end
-    SetDisplayPolling(displayActive and (d.coord or d.speed or d.distance))
     button:Show()
 
     -- Sample only displayed data, once per update. Reuse the position for text.
@@ -389,10 +424,32 @@ local function UpdateDisplay()
         local map
         map, x, y = GetPlayerPos()
     end
+    -- Keep a low-frequency safety sample for transports/teleports without movement events.
+    -- Raw position detects slow movement even before the displayed tenth changes.
+    local moved = x ~= sampledX or y ~= sampledY
+    sampledX, sampledY = x, y
+    local fast = movementWake or moved or (d.speed and (pct == nil or pct > 0))
+    movementWake = false
+    SetDisplayPolling(displayActive and (d.coord or d.speed or d.distance), fast and 0.1 or 0.5)
     local speedChanged = (pct or -1) ~= lastShownPct
     lastShownPct = pct or -1
+    -- The target can move while the player stands still. Range has its own
+    -- bounded sample and dirty check, independent of position/speed formatting.
+    local rangeChanged = false
+    if d.distance then
+        local now = GetTime()
+        if now >= nextRangeAt then
+            local value = RangeString("target")
+            rangeChanged = value ~= cachedRange
+            cachedRange = value
+            nextRangeAt = now + 0.5
+        end
+    else
+        cachedRange = nil
+        nextRangeAt = 0
+    end
     local positionChanged = DisplayDirty(x, y)
-    if not speedChanged and not positionChanged then return end
+    if not speedChanged and not positionChanged and not rangeChanged then return end
 
     local lines = displayLines
     wipe(lines)
@@ -409,7 +466,7 @@ local function UpdateDisplay()
     end
     if d.distance then
         -- 没目标时显示完整未知区间 0-100码；有目标时收窄成实测区间。
-        local t = T["距离 "] .. (UnitExists("target") and (RangeString("target") or T["0-100码"]) or T["0-100码"])
+        local t = T["距离 "] .. (cachedRange or T["0-100码"])
         lines[#lines + 1] = colorize(t, d.distColor)
     end
     if #lines == 0 then lines[1] = T["点击通报"] end
@@ -426,6 +483,14 @@ displayTask.run = function()
         ns.Print(T["坐标喊话：刷新出错（已继续运行）："] .. tostring(err))
     end
 end
+
+targetEv:SetScript("OnEvent", function(_, event)
+    if not displayActive then return end
+    movementWake = event == "PLAYER_STARTED_MOVING"
+    ForceDirty()
+    -- Wake immediately through the same guarded refresh used by the timer.
+    displayTask.run()
+end)
 
 local function CreateButton()
     if button then return button end
@@ -575,7 +640,20 @@ local function SetupSlash()
     SLASH_BMCOORDSHOUT3 = "/bmcoord"  -- 保底别名：短命令被别的插件抢走时用
     SlashCmdList["BMCOORDSHOUT"] = function(msg)
         local cmd = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-        if cmd == "say" or cmd == "send" or cmd == "go" then
+        if cmd == "range" then
+            -- Report only on request; never clear a live context quarantine.
+            if not UnitExists("target") then
+                ns.Print(T["距离诊断：请先选择目标。"])
+            elseif not RangeContext("target") then
+                ns.Print(T["距离诊断：当前目标或场景不允许安全测距，暂不调用接口。"])
+            elseif blockedRangeContexts[RangeContext("target")] then
+                ns.Print(T["距离诊断：当前测距场景曾被拦截，本次登录已停止调用；其他安全场景不受影响。"])
+            else
+                local ok, value = pcall(RangeString, "target")
+                if ok and value then ns.Print(T["距离诊断：当前区间 "] .. value)
+                else ns.Print(T["距离诊断：接口未返回可用区间；0-100码表示未知，并非实测距离。"]) end
+            end
+        elseif cmd == "say" or cmd == "send" or cmd == "go" then
             Announce()
         elseif cmd == "lock" then
             L().locked = true; Refresh(); ns.Print(T["坐标喊话：已锁定位置（背景已隐藏）。"])
@@ -604,10 +682,8 @@ ns.RegisterModule({
     desc = T["屏上显示坐标/移速/到目标的距离区间，点击按模板把坐标通报到频道。"],
     defaults = defaults,
     OnEnable = function()
-        -- 上次已在当前客户端版本被系统封过测距：直接跳过探测，本次登录不再产生拦截记录。
-        if DB().rangeBlockedBuild and DB().rangeBlockedBuild == CurBuild() then
-            rangeBlocked = true
-        end
+        -- Retire the old overbroad build-wide switch; every query is now gated.
+        DB().rangeBlockedBuild = nil
         CreateButton()
         displayActive = true
         SetupTargetEvent()

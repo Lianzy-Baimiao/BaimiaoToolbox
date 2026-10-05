@@ -22,7 +22,7 @@ local W,H=820,422
 local CONTENT_BOTTOM=H-8
 local TILE_HEIGHT,TILE_PITCH=64,70
 local TILE_TOP=CONTENT_BOTTOM-3*TILE_PITCH-TILE_HEIGHT
-local Refresh, Queue, Render, HidePortals, RequestData
+local Refresh, Queue, Render, HidePortals, RequestData, SyncEvents
 local events=CreateFrame("Frame")
 local function Paint()
     for _,fn in ipairs(painters) do fn() end
@@ -520,8 +520,9 @@ local function fit()
     canvas:SetScale(scale)
 end
 Refresh=function()
-    if InCombatLockdown() then pending=true;return end
+    if InCombatLockdown() then pending=true;SyncEvents();return end
     pending=false
+    SyncEvents()
     local visible=Enabled() and ChallengesFrame and ChallengesFrame:IsVisible() and PVEFrame
     if not visible then restore();return end
     if not host then build() end
@@ -529,7 +530,7 @@ Refresh=function()
     snapshot=D.Snapshot();Render();suppressKogo()
 end
 Queue=function()
-    if queued then return end
+    if queued or (not Enabled() and not active and not pending) then return end
     queued=true
     C_Timer.After(0,function()queued=false;Refresh()end)
 end
@@ -537,6 +538,7 @@ local function hookChallenges()
     if hooked or not ChallengesFrame then return end
     hooked=true
     ChallengesFrame:HookScript("OnShow",function()
+        if not Enabled() then return end
         if ns.PartyKeystones then ns.PartyKeystones.Request()end
         Queue()
         -- Kogo creates its independent panel on a delayed callback. A bounded
@@ -572,6 +574,23 @@ local function ReportTeam()
         ns.Print(T[entry.source].." +"..entry.level..T["：名单 "]..count..T[" 人 / 有姓名 "]..named..T[" 人。"])
     end
 end
+local eventMode
+SyncEvents=function()
+    local mode=Enabled() and "enabled" or (pending and "restore" or "off")
+    if eventMode==mode then return end
+    eventMode=mode;events:UnregisterAllEvents()
+    if mode=="enabled" then
+        for _,event in ipairs({"ADDON_LOADED","PLAYER_ENTERING_WORLD","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED",
+            "CHALLENGE_MODE_MAPS_UPDATE","CHALLENGE_MODE_LEADERS_UPDATE","CHALLENGE_MODE_COMPLETED",
+            "WEEKLY_REWARDS_UPDATE","MYTHIC_PLUS_CURRENT_AFFIX_UPDATE","MYTHIC_PLUS_NEW_WEEKLY_RECORD",
+            "BAG_UPDATE_DELAYED","SPELLS_CHANGED","SPELL_UPDATE_COOLDOWN","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do
+            events:RegisterEvent(event)
+        end
+    elseif mode=="restore" then
+        -- Secure portals/native geometry must be restored only after combat.
+        events:RegisterEvent("PLAYER_REGEN_ENABLED")
+    end
+end
 local registered=false
 local function init()
     if ns.PartyKeystones then ns.PartyKeystones.Start(Queue,Enabled)end
@@ -581,15 +600,9 @@ local function init()
         SlashCmdList.BMMYTHICPLUS=function(msg)
             if (msg or ""):lower():match("^%s*team%s*$") then ReportTeam() else openTab() end
         end
-        for _,event in ipairs({"ADDON_LOADED","PLAYER_ENTERING_WORLD","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED",
-            "CHALLENGE_MODE_MAPS_UPDATE","CHALLENGE_MODE_LEADERS_UPDATE","CHALLENGE_MODE_COMPLETED",
-            "WEEKLY_REWARDS_UPDATE","MYTHIC_PLUS_CURRENT_AFFIX_UPDATE","MYTHIC_PLUS_NEW_WEEKLY_RECORD",
-            "BAG_UPDATE_DELAYED","SPELLS_CHANGED","SPELL_UPDATE_COOLDOWN","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do
-            events:RegisterEvent(event)
-        end
         UI.OnTheme(function()Paint();if active then Queue() end end)
     end
-    hookChallenges();Queue()
+    SyncEvents();hookChallenges();Queue()
 end
 events:SetScript("OnEvent",function(_,event,name)
     if event=="ADDON_LOADED" then

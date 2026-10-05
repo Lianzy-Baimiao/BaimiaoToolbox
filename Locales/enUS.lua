@@ -1025,3 +1025,42 @@ L["覆盖指定脚本、坐标/嗜血计时器及快捷冷却内部刷新，不�
 L["诊断正在运行；/bmperf cancel 可取消。"] = "Diagnostic running; /bmperf cancel to cancel."
 L["请脱离战斗后运行诊断。"] = "Run diagnostics out of combat."
 L["开始30秒挂机诊断：前10秒原生采样，后20秒回调计时；请保持当前开关不变，进入战斗自动结束。"] = "Starting 30-second idle diagnostic: 10 s native sampling, then 20 s callback timing. Keep settings unchanged; combat ends sampling automatically."
+
+-- Bloodlust playlist
+L["播放列表"] = "Playlist"
+L["播放方式"] = "Playback mode"
+L["列表顺序播放"] = "Playlist: in order"
+L["列表随机播放"] = "Playlist: shuffle"
+L["随机单曲"] = "One random track"
+L["空列表沿用上方单曲设置。最多20首；先选音乐或填写路径，再添加。"] = "An empty list uses the single-track settings above. Up to 20 tracks; select a sound or enter a path, then add it."
+L["添加当前音乐"] = "Add selected sound"
+L["曲目"] = "Track"
+L["上移曲目"] = "Move up"
+L["下移曲目"] = "Move down"
+L["删除曲目"] = "Remove"
+L["试听曲目"] = "Preview track"
+L["曲目播放秒数"] = "Track duration (seconds)"
+L["单曲间隔 / 新曲默认秒数"] = "Single-track interval / new track default"
+L["按设置秒数切歌，不自动读取音频长度。\n顺序/随机列表各播放一轮；开启循环后重复。\n随机单曲每次嗜血抽一首，循环时仍播放该曲。"] = "Tracks switch after the configured duration; audio length is not detected.\nOrdered/shuffled lists play one pass, then repeat if looping is enabled.\nRandom single picks one track per Bloodlust; looping repeats that track."
+
+-- Native idle comparison
+L["自动对照结束；刷新已恢复。取消：%s。"] = "Automatic comparison finished; refresh callbacks restored. Cancelled: %s."
+L["未运行，跳过"] = "Not running; skipped"
+L["只暂停指定刷新函数，不停事件和计时器调度。own 为插件毫秒耗时；需比较前后基线，滚动样本并非独立测量，不能当作模块精确占比。"] = "Only selected refresh functions are paused; events and timer scheduling remain active. own is addon time in ms. Compare surrounding baselines; rolling samples are not independent and do not give exact module shares."
+L["对照阶段 %d/7：%s"] = "Comparison phase %d/7: %s"
+L["开始210秒自动对照：保持原地，不操作、不改设置。临时暂停坐标、嗜血与快捷冷却刷新，完成后恢复；移动或战斗自动取消。/bmperf cancel 可取消。"] = "Starting a 210-second comparison: stay still, do not interact or change settings. Coordinate, Bloodlust and quick cooldown refreshes are temporarily paused and restored. Movement or combat cancels automatically. /bmperf cancel to cancel."
+
+-- Unified music duration
+L["播放时长（秒）"] = "Playback duration (seconds)"
+L["播放完后重复，直到嗜血结束。"] = "Repeat after playback until Bloodlust ends."
+L["有列表时调整所选曲目；空列表时调整当前单曲。"] = "Edits the selected track, or the current single sound if the list is empty."
+
+-- Coordinate range diagnostic
+L["距离诊断：请先选择目标。"] = "Range diagnostic: select a target first."
+L["距离诊断：本客户端版本曾拦截测距，已停止调用；0-100码表示未知，并非实测距离。"] = "Range diagnostic: this client build previously blocked range checks; calls are disabled. 0-100 yards means unknown, not a measured distance."
+L["距离诊断：当前区间 "] = "Range diagnostic: current interval "
+L["距离诊断：接口未返回可用区间；0-100码表示未知，并非实测距离。"] = "Range diagnostic: no usable interval returned by the API. 0-100 yards means unknown, not a measured distance."
+
+-- Context-aware range checks
+L["距离诊断：当前目标或场景不允许安全测距，暂不调用接口。"] = "Range diagnostic: safe range checks are unavailable for this target or context; API calls are skipped."
+L["距离诊断：当前测距场景曾被拦截，本次登录已停止调用；其他安全场景不受影响。"] = "Range diagnostic: checks were blocked in this context and are disabled for this login; other safe contexts are unaffected."

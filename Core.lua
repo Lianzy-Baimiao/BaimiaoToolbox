@@ -1421,6 +1421,9 @@ ev:SetScript("OnEvent", function()
             m.db = ns.GetDB(m.id, m.defaults)
             if m.OnEnable then m.OnEnable(m) end
         end)
+        -- OnEnable also builds one-time UI/commands. Preserve that contract, then
+        -- apply the saved off state through the same cleanup path as the switch.
+        if not ns.IsModuleEnabled(m.id) then ns.SetModuleEnabled(m.id, false) end
         if not ok then
             P((T["|cffff4040模块 %s 初始化失败：|r%s"]):format(tostring(m.id), tostring(err)))
         end

@@ -342,6 +342,7 @@ end
 --------------------------------------------------------------------------------
 
 local musicHandle
+local musicGeneration = 0
 local musicTicker    -- 循环播放的计时器
 local musicWantedLast = false
 local lastPlayResult, lastPlayAt = T["尚未请求"], nil
@@ -371,12 +372,13 @@ local function SoundList()
 end
 
 -- 解析出真正要播放的文件（路径或 fileDataID）。
-local function ResolveSoundFile()
-    local m = DB().music
+local function ResolveSoundFile(track)
+    local m = track or DB().music
     if m.sound == "__custom__" then
         if not m.file or m.file == "" then return nil end
         return tonumber(m.file) or m.file
     end
+    if type(m.sound) ~= "string" then return nil end
     local lsm = GetLSM()
     if lsm then
         local f = lsm:Fetch("sound", m.sound, true)  -- noDefault
@@ -387,10 +389,12 @@ end
 
 -- 播放一次并返回 handle、请求结果；客户端接受请求不等于玩家一定能听见。
 -- sound 不传则用当前设置；report 仅供主动点“试听”反馈，悬停/自动播放不刷屏。
-local function PlaySoundOnce(sound, report)
+local function PlaySoundOnce(sound, report, track)
     local m = DB().music
     local file
-    if sound then
+    if track then
+        file = ResolveSoundFile(track)
+    elseif sound then
         if sound == "__custom__" then
             file = (m.file and m.file ~= "") and (tonumber(m.file) or m.file) or nil
         else
@@ -422,6 +426,7 @@ end
 
 -- 停止：取消循环计时器 + 停当前音。
 local function StopLustMusic()
+    musicGeneration = musicGeneration + 1
     if musicTicker then musicTicker:Cancel(); musicTicker = nil end
     if musicHandle then pcall(StopSound, musicHandle); musicHandle = nil end
 end
@@ -443,9 +448,62 @@ local function PlayAutomaticOnce()
     lastPlayAt = GetTime()
 end
 
+-- Snapshot at trigger time; no playlist polling or permanent timer.
+local function PlayPlaylist(m)
+    local tracks = {}
+    for i = 1, math.min(20, #m.tracks) do
+        local t = m.tracks[i]
+        if type(t) == "table" then
+            local seconds = tonumber(t.seconds) or 3
+            if seconds ~= seconds then seconds = 3 end
+            tracks[#tracks + 1] = { sound = t.sound, file = t.file,
+                seconds = math.max(1, math.min(180, seconds)) }
+        end
+    end
+    if #tracks == 0 then return end
+    local mode = m.mode or "single"
+    if mode ~= "sequence" and mode ~= "shuffle" then mode = "single" end
+    local function Shuffle()
+        for i = #tracks, 2, -1 do
+            local j = math.random(i)
+            tracks[i], tracks[j] = tracks[j], tracks[i]
+        end
+    end
+    if mode == "shuffle" then Shuffle() end
+    local index = mode == "single" and math.random(#tracks) or 1
+    local generation = musicGeneration
+    local function Advance()
+        if generation ~= musicGeneration then return end
+        if musicTicker then musicTicker:Cancel(); musicTicker = nil end
+        if not WantsMusic() or (lustState.endsAt and GetTime() >= lustState.endsAt)
+            or (UnitIsDeadOrGhost and UnitIsDeadOrGhost("player")) then
+            StopLustMusic(); return
+        end
+        local track = tracks[index]
+        if musicHandle then pcall(StopSound, musicHandle); musicHandle = nil end
+        musicHandle, lastPlayResult = PlaySoundOnce(nil, false, track)
+        lastPlayAt = GetTime()
+        if mode == "single" and not DB().music.loop then return end
+        musicTicker = C_Timer.NewTicker(track.seconds, function()
+            if generation ~= musicGeneration then return end
+            if mode ~= "single" then index = index + 1 end
+            if (mode == "single" or index > #tracks) and not DB().music.loop then
+                StopLustMusic(); return
+            end
+            if index > #tracks then
+                index = 1
+                if mode == "shuffle" then Shuffle() end
+            end
+            Advance()
+        end)
+    end
+    Advance()
+end
+
 local function PlayLustMusic()
     local m = DB().music
     StopLustMusic()
+    if type(m.tracks) == "table" and #m.tracks > 0 then PlayPlaylist(m); return end
     PlayAutomaticOnce()
     if m.loop then
         local interval = math.max(1, tonumber(m.loopInterval) or 3)
@@ -489,7 +547,12 @@ local function ReportMusic()
     local trigger = lastTriggerSource and (lastTriggerSource .. (T["（%.0f秒前）"]):format(GetTime() - lastTriggerAt)) or T["未检测到"]
     local result = lastPlayResult .. (lastPlayAt and (T["（%.0f秒前）"]):format(GetTime() - lastPlayAt) or "")
     ns.Print(T["上次触发："] .. trigger .. T["；自动播放："] .. result .. "。")
+    if type(m.tracks) == "table" and #m.tracks > 0 then
+        ns.Print(T["播放列表"] .. ": " .. #m.tracks .. " / " ..
+            (m.mode == "sequence" and T["列表顺序播放"] or m.mode == "shuffle" and T["列表随机播放"] or T["随机单曲"]))
+    else
     ns.Print(T["声音："] .. (m.sound or T["未选择"]) .. T["；资源"] .. (ResolveSoundFile() and T["已解析"] or T["未找到"]) .. "。")
+    end
     if GetCVar then
         local channel = m.channel or "Master"
         local function Setting(name)
@@ -517,16 +580,21 @@ local function PollTick()
     if pollActive then pollTask.run() end
 end
 local function SetPolling(active)
+    if active and not pollActive then worldLeaving = false end
     pollActive = active and true or false
     if not pollFrame then return end
     pollFrame:SetShown(pollActive)
     if pollActive then
+        for _, event in ipairs({"PLAYER_ENTERING_WORLD", "PLAYER_LEAVING_WORLD",
+            "ZONE_CHANGED_NEW_AREA", "PLAYER_DEAD", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED"}) do
+            pollFrame:RegisterEvent(event)
+        end
         if not pollTask.timer then pollTask.timer = C_Timer.NewTicker(0.25, PollTick) end
         if pollFrame.RegisterUnitEvent then pollFrame:RegisterUnitEvent("UNIT_AURA", "player")
         else pollFrame:RegisterEvent("UNIT_AURA") end
     else
         if pollTask.timer then pollTask.timer:Cancel(); pollTask.timer = nil end
-        pollFrame:UnregisterEvent("UNIT_AURA")
+        pollFrame:UnregisterAllEvents()
     end
 end
 local layoutDirty = true
@@ -682,14 +750,8 @@ local function CreateFrameOnce()
     local poll = CreateFrame("Frame", "BaimiaoRaidCDPoll", UIParent)
     pollFrame = poll
     SetPolling(ns.IsModuleEnabled(MODULE_ID) and DB().enabled)
-    poll:RegisterEvent("PLAYER_ENTERING_WORLD")
-    poll:RegisterEvent("PLAYER_LEAVING_WORLD")
-    poll:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    poll:RegisterEvent("PLAYER_DEAD")
-    poll:RegisterEvent("PLAYER_REGEN_DISABLED")
-    poll:RegisterEvent("PLAYER_REGEN_ENABLED")
     poll:SetScript("OnEvent", function(_, event, unit, updateInfo)
-        -- 即使模块在载入期间关闭，也不能把离开世界的标记留到再次启用。
+        -- 启用状态下跟踪世界切换；停用后的重新启用由 SetPolling 重置。
         if event == "PLAYER_ENTERING_WORLD" then worldLeaving = false end
         if not pollActive or (event == "UNIT_AURA" and unit ~= "player") then return end
         if event == "UNIT_AURA" then
@@ -769,6 +831,18 @@ local function BuildOptions(panel,m,L)
                 DB().music.enabled=v;if not v then StopLustMusic()end
             end,function()L:SyncAll()end)
             local function musicEnabled()return DB().music.enabled end
+            local selected = 1
+            local function Tracks()
+                local music = DB().music
+                if type(music.tracks) ~= "table" then music.tracks = {} end
+                return music.tracks
+            end
+            local function Changed()
+                StopLustMusic()
+                selected = math.max(1, math.min(selected, #Tracks()))
+                L:SyncAll()
+            end
+
             m.musicGroups=ns.UI.OptionGroups(panel,L,{
                 {title=T["音乐与试听"],visible=musicEnabled,build=function(_,c)
                     c:Row({
@@ -791,10 +865,62 @@ local function BuildOptions(panel,m,L)
                     end},
                 {title=T["嗜血持续期间循环播放"],visible=musicEnabled,enabled=function()return DB().music.loop end,
                     setEnabled=function(v)DB().music.loop=v end,build=function(_,c)
-                        c:Slider("BaimiaoRaidCDLoopSlider",T["循环间隔(秒)"],1,30,1,
-                            function()return DB().music.loopInterval or 3 end,function(v)DB().music.loopInterval=v end)
-                        c:Text(T["间隔建议与音频长度一致；声道设置对循环同样生效。"],true)
+                        c:Text(T["播放完后重复，直到嗜血结束。"],true)
                     end},
+                {title=T["播放列表"],visible=musicEnabled,build=function(_,c)
+                    c:Dropdown(320,T["播放方式"],{
+                        {value="sequence",text=T["列表顺序播放"]},
+                        {value="shuffle",text=T["列表随机播放"]},
+                        {value="single",text=T["随机单曲"]},
+                    },function()return DB().music.mode or "single" end,
+                        function(v)DB().music.mode=v;Changed()end)
+                    c:Text(T["空列表沿用上方单曲设置。最多20首；先选音乐或填写路径，再添加。"],true)
+                    c:Button(180,T["添加当前音乐"],function()
+                        ns.UI.CommitOptionsFocus(panel)
+                        local music, tracks = DB().music, Tracks()
+                        if #tracks >= 20 or not ResolveSoundFile() then return end
+                        tracks[#tracks+1]={sound=music.sound,file=music.file,seconds=music.loopInterval or 3}
+                        selected=#tracks;Changed()
+                    end)
+                    c:Dropdown(500,T["曲目"],function()
+                        local out={}
+                        for i,t in ipairs(Tracks())do
+                            local name=t.sound=="__custom__" and tostring(t.file or "") or tostring(t.sound or "")
+                            out[#out+1]={value=i,text=i..". "..name}
+                        end
+                        return out
+                    end,function()return selected end,function(v)selected=v;L:SyncAll()end)
+                    c:Row({
+                        function(cell)cell:Button(100,T["上移曲目"],function()
+                            local tracks=Tracks()
+                            if selected>1 then tracks[selected],tracks[selected-1]=tracks[selected-1],tracks[selected];selected=selected-1;Changed()end
+                        end)end,
+                        function(cell)cell:Button(100,T["下移曲目"],function()
+                            local tracks=Tracks()
+                            if selected<#tracks then tracks[selected],tracks[selected+1]=tracks[selected+1],tracks[selected];selected=selected+1;Changed()end
+                        end)end,
+                        function(cell)cell:Button(100,T["删除曲目"],function()
+                            if Tracks()[selected] then table.remove(Tracks(),selected);Changed()end
+                        end)end,
+                        function(cell)cell:Button(100,T["试听曲目"],function()
+                            local track=Tracks()[selected]
+                            if track then StopLustMusic();musicHandle=PlaySoundOnce(nil,true,track)end
+                        end)end,
+                    },110)
+                    -- One editor for the selected track, or the legacy single sound when empty.
+                    c:Slider("BaimiaoRaidCDTrackSeconds",T["播放时长（秒）"],1,180,1,
+                        function()
+                            local track=Tracks()[selected]
+                            return track and (track.seconds or 3) or DB().music.loopInterval or 3
+                        end,
+                        function(v)
+                            local track=Tracks()[selected]
+                            if track then track.seconds=v else DB().music.loopInterval=v end
+                            StopLustMusic()
+                        end)
+                    c:Text(T["有列表时调整所选曲目；空列表时调整当前单曲。"],true)
+                    c:Text(T["按设置秒数切歌，不自动读取音频长度。\n顺序/随机列表各播放一轮；开启循环后重复。\n随机单曲每次嗜血抽一首，循环时仍播放该曲。"],true)
+                end},
             },onResize)
         end},
     })

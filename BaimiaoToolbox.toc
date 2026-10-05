@@ -11,7 +11,7 @@
 ## SavedVariables: BaimiaoToolboxDB
 ## SavedVariablesPerCharacter: BaimiaoToolboxDBPC
 ## OptionalDeps: LibSharedMedia-3.0
-## Version: 1.9.18
+## Version: 1.9.19
 ## IconTexture: Interface\AddOns\BaimiaoToolbox\media\cat_icon.tga
 
 Locales\Locale.lua

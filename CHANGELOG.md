@@ -1,3 +1,59 @@
+## 1.9.19 — 2026-10-06
+
+## English
+### Bloodlust music
+- Added playlists with up to 20 tracks: sequential playback, shuffled playback, or one randomly selected track per Bloodlust trigger.
+- Reorder, remove, and preview tracks. One duration control edits the selected track, or the legacy single-track duration when the playlist is empty.
+- Playback timers stop with the active Bloodlust session. Audio files are not bundled; configure your own source or use registered shared media.
+
+### Background work and lifecycle
+- Quick-button cooldowns share one managed refresh timer instead of per-button frame updates.
+- Coordinates sample more slowly while stationary and resume faster updates when moving. Target distance refreshes independently, including when only the target moves.
+- Saved disabled modules now run their cleanup after login initialization. Mythic+ unregisters events when disabled and avoids new refresh tasks from inactive native-window hooks; combat-safe restoration is preserved.
+- Coordinate and Bloodlust modules now remove remaining event listeners when disabled and restore them when re-enabled.
+- Added opt-in /bmperf compare: a roughly 210-second alternating comparison of selected refresh bodies. /bmperf cancel stops the test; results distinguish native addon time from its percentage denominator. This is not a complete module profiler or a guaranteed CPU reduction.
+
+### Target distance
+- Removed the persisted client-build-wide range disable. Range checks now respect target/context restrictions and secret values; a blocked context does not disable every other context across future logins.
+- Restricted or unavailable range data remains unknown. No protected API restrictions are bypassed.
+
+### Auction House
+- Added Liquid Luster (271887) to Potions, with a versatility label and icon fallback for 271886/271887. The catalog now contains 86 presets.
+- Replaced outdated Thunderous Drums (219905) with Void-Touched Drums (244639) in Common. Existing personal favorites and restock lists are not rewritten.
+
+### Installation and validation
+- Retail only. English, Simplified Chinese, Traditional Chinese, and Korean remain supported.
+- 642 offline regression tests passed. Live-client target distance was confirmed working by the user; no fixed CPU or memory saving is claimed.
+- Exit the game, replace the addon folder, and restart. Keep SavedVariables. The ZIP contains runtime files and licenses only, without audio or publishing documents.
+
+---
+
+## 中文
+### 嗜血音乐
+- 新增最多 20 首的音乐列表，支持列表顺序、随机顺序，以及每次嗜血随机选一首播放。
+- 支持调序、删除和试听；统一为一个播放时长控件，有列表时编辑选中曲目，无列表时编辑原单曲时长。
+- 播放计时器随本次嗜血结束而停止。安装包不附带音频，请自行配置来源或使用已注册的共享媒体。
+
+### 后台工作与生命周期
+- 快捷按钮冷却改用单个受管理的共享刷新计时器，替代逐按钮逐帧检查。
+- 坐标静止时降低采样频率，移动时恢复快速更新；目标距离独立刷新，玩家不动而目标移动时也能更新。
+- 登录初始化后落实已保存的模块关闭状态；史诗钥石停用时注销事件，关闭状态的原生窗口钩子不再创建无用刷新任务，保留战斗中的安全延迟恢复。
+- 补齐坐标和嗜血模块停用时的残留事件清理，重新启用时恢复监听。
+- 新增按需运行的 /bmperf compare：约 210 秒交替对照指定刷新函数体。/bmperf cancel 可取消；区分插件原生耗时与百分比分母，不是全模块精确分析，也不承诺固定 CPU 降幅。
+
+### 目标距离
+- 移除持久化的“整个客户端版本停止测距”记录；按目标、场景和秘密值限制决定是否测距，不再因一次拦截封住以后登录的全部测距场景。
+- 受限或不可用的距离仍视为未知，不绕过受保护 API 限制。
+
+### 拍卖行
+- 药水新增液态光泽（271887），显示全能属性，并为 271886/271887 提供图标兜底；内置预设增至 86 项。
+- 常用分类将过时的掣雷之鼓（219905）替换为虚触战鼓（244639），不改写已有个人收藏和补货清单。
+
+### 安装与验证
+- 仅支持正式服，保留英文、简体中文、繁体中文和韩语支持。
+- 642 项离线回归测试通过；目标距离已由用户实机确认恢复正常。不承诺固定 CPU 或内存节省。
+- 完全退出游戏后覆盖插件文件夹，再启动游戏；保留 SavedVariables。ZIP 仅含运行文件及许可证，不含音频和发布说明文档。
+
 ## 1.9.18 — 2026-10-06
 
 Upgrade notes: 1.9.17 → 1.9.18

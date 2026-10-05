@@ -36,10 +36,38 @@ local function ReportNative(label, samples)
   end
 end
 
+-- Compare callback bodies without profiling wrappers. Timers/events stay registered.
+local function RestoreCompare(s)
+  if s.task then
+    if s.task.run == s.noop then s.task.run = s.original end
+    s.task, s.original = nil, nil
+  end
+end
+
+local function FinishCompare(s, cancelled)
+  RestoreCompare(s)
+  s.timer:Cancel()
+  eventFrame:UnregisterAllEvents()
+  eventFrame:SetScript("OnEvent", nil)
+  s.running, s.cancelled = false, cancelled
+  s.timer, s.noop, s.watch = nil, nil, nil
+  ns.IdleCompareResult = s
+  Say(T["自动对照结束；刷新已恢复。取消：%s。"], tostring(cancelled))
+  for _, phase in ipairs(s.phases) do
+    if phase.skipped then
+      Say("%s: %s", phase.label, T["未运行，跳过"])
+    elseif #phase.samples > 0 then
+      ReportNative(phase.label, phase.samples)
+    end
+  end
+  Say(T["只暂停指定刷新函数，不停事件和计时器调度。own 为插件毫秒耗时；需比较前后基线，滚动样本并非独立测量，不能当作模块精确占比。"])
+end
+
 local function Finish(cancelled)
   local s = active
   if not s then return end
   active = nil
+  if s.compare then FinishCompare(s, cancelled); return end
   s.running = false
   s.timer:Cancel()
   eventFrame:UnregisterAllEvents()
@@ -157,11 +185,68 @@ local function Instrument(s)
   Add(ns.AuctionHouse and ns.AuctionHouse.panel, "Auction", "OnUpdate")
 end
 
+local function StartCompare()
+  local ok, sample = pcall(NativePercent)
+  if not ok or not sample then Say(T["原生CPU数据不可用；未自动开启CPU分析。"]); return end
+  local s = {compare=true, running=true, phases={}, watch={}, index=1, phaseAt=GetTime(), noop=function()end}
+  for i, name in ipairs({"baseline-1", "Coord", "baseline-2", "RaidCD", "baseline-3", "QuickCooldown", "baseline-4"}) do
+    s.phases[i] = {label=i % 2 == 0 and ("paused-" .. name) or name,
+      target=i % 2 == 0 and name or nil, samples={}}
+  end
+  for _, name in ipairs({"Coord", "RaidCD", "QuickCooldown"}) do
+    local task = ns.IdleTasks and ns.IdleTasks[name]
+    if task then s.watch[name] = {task=task, run=task.run, timer=task.timer} end
+  end
+  active = s
+  eventFrame = eventFrame or CreateFrame("Frame")
+  for _, event in ipairs({"PLAYER_REGEN_DISABLED", "PLAYER_LOGOUT", "PLAYER_STARTED_MOVING", "ZONE_CHANGED_NEW_AREA"}) do
+    eventFrame:RegisterEvent(event)
+  end
+  eventFrame:SetScript("OnEvent", function() Finish(true) end)
+  s.timer = C_Timer.NewTicker(1, function()
+    if active ~= s then return end
+    if InCombatLockdown() then Finish(true); return end
+    for name, watch in pairs(s.watch) do
+      if not ns.IdleTasks or ns.IdleTasks[name] ~= watch.task or watch.task.timer ~= watch.timer
+          or watch.task.run ~= (watch.task == s.task and s.noop or watch.run) then
+        Finish(true); return
+      end
+    end
+    local elapsed = GetTime() - s.phaseAt
+    local phase = s.phases[s.index]
+    -- Allow 20 seconds of settling, then keep ten 1-second rolling samples.
+    if elapsed > 20 and not phase.skipped then
+      local valid, value = pcall(NativePercent)
+      if not valid or not value then Finish(true); return end
+      phase.samples[#phase.samples+1] = value
+    end
+    if elapsed < 30 then return end
+    RestoreCompare(s)
+    s.index = s.index + 1
+    phase = s.phases[s.index]
+    if not phase then Finish(false); return end
+    s.phaseAt = GetTime()
+    if phase.target then
+      local watch = s.watch[phase.target]
+      if watch and watch.timer and type(watch.run) == "function" then
+        s.task, s.original = watch.task, watch.run
+        s.task.run = s.noop
+      else phase.skipped = true end
+    end
+    Say(T["对照阶段 %d/7：%s"], s.index, phase.label)
+  end)
+  Say(T["开始210秒自动对照：保持原地，不操作、不改设置。临时暂停坐标、嗜血与快捷冷却刷新，完成后恢复；移动或战斗自动取消。/bmperf cancel 可取消。"])
+end
+
 SLASH_BAIMIAOPERF1 = "/bmperf"
 SlashCmdList.BAIMIAOPERF = function(msg)
   if (msg or ""):lower():match("^%s*cancel%s*$") then Finish(true); return end
   if active then Say(T["诊断正在运行；/bmperf cancel 可取消。"]); return end
   if InCombatLockdown() then Say(T["请脱离战斗后运行诊断。"]); return end
+  if (msg or ""):lower():match("^%s*compare%s*$") then
+    if C_Timer and C_Timer.NewTicker then StartCompare() end
+    return
+  end
   if not debugprofilestop or not C_Timer or not C_Timer.NewTicker then return end
   -- No frame, ticker, hooks or result arrays exist until explicitly requested.
   local s = {running=true, started=GetTime(), rows={}, native={}, nativeRaw={}, instrumentedNative={}, skipped=0, changed=0}

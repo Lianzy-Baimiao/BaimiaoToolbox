@@ -102,7 +102,7 @@ function A.ItemName(id)
     return T["物品 #"]..id
 end
 function A.ItemIcon(id)
-    return (id and read(C_Item and C_Item.GetItemIconByID or GetItemIcon,id)) or 134400
+    return (id and read(C_Item and C_Item.GetItemIconByID or GetItemIcon,id)) or (A.iconFallbacks and A.iconFallbacks[id]) or 134400
 end
 function A.Inventory(id,target,includeBank)
     local owned=A.Integer(read(C_Item and C_Item.GetItemCount or GetItemCount,id,includeBank==true,false,includeBank==true,includeBank==true),0,A.MAX_QUANTITY*100)

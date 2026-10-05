@@ -777,13 +777,43 @@ ns.IdleTasks = ns.IdleTasks or {}
 local cooldownTask = {run=PaintCooldown, profileRefresh=true}
 ns.IdleTasks.QuickCooldown = cooldownTask
 
--- Only entries with a cooldown get a callback; pooled macro buttons stay idle.
-local function UpdateExtraCooldown(self, dt)
-    if not self._entry then return end
-    self.cooldownElapsed = (self.cooldownElapsed or 0) + dt
-    if self.cooldownElapsed < 0.25 then return end
-    self.cooldownElapsed = 0
-    cooldownTask.run(self.cd, self._entry)
+-- One non-secure timer owns refresh cadence. Secure action buttons have no
+-- per-frame cooldown handlers; keep the existing reads/secret-value policy.
+local function StopExtraCooldowns()
+    if cooldownTask.timer then
+        cooldownTask.timer:Cancel()
+        cooldownTask.timer = nil
+    end
+end
+
+local function NeedsExtraCooldown(b)
+    return b._entry and b._entry.kind ~= "macro" and b:IsVisible()
+end
+
+local function RefreshExtraCooldowns()
+    if not ns.IsModuleEnabled(MODULE_ID) then StopExtraCooldowns(); return end
+    local any = false
+    for _, b in ipairs(extraButtons) do
+        if NeedsExtraCooldown(b) then
+            any = true
+            cooldownTask.run(b.cd, b._entry)
+        end
+    end
+    if not any then StopExtraCooldowns() end
+end
+
+local function SyncExtraCooldowns()
+    if ns.IsModuleEnabled(MODULE_ID) then
+        for _, b in ipairs(extraButtons) do
+            if NeedsExtraCooldown(b) then
+                if not cooldownTask.timer then
+                    cooldownTask.timer = C_Timer.NewTicker(0.25, RefreshExtraCooldowns)
+                end
+                return
+            end
+        end
+    end
+    StopExtraCooldowns()
 end
 
 local function EnsureExtraButton(index)
@@ -860,6 +890,9 @@ local function EnsureExtraButton(index)
 
 
     extraButtons[index] = b
+    -- Observe visibility only; never replace secure OnClick or action attributes.
+    b:HookScript("OnShow", SyncExtraCooldowns)
+    b:HookScript("OnHide", SyncExtraCooldowns)
     return b
 end
 
@@ -1002,8 +1035,6 @@ local function RebuildExtraButtons()
         local b = EnsureExtraButton(i)
         ApplySecureAttrs(b, entry)
         b._entry = entry
-        b.cooldownElapsed = 0
-        b:SetScript("OnUpdate", entry.kind ~= "macro" and UpdateExtraCooldown or nil)
         -- An entry may have changed kind while reusing a secure button.
         ClearExtraCooldown(b.cd)
         b.icon:SetTexture(entry.icon)
@@ -1023,12 +1054,14 @@ local function RebuildExtraButtons()
         b.label:Hide()
         b._entry = nil
     end
+    SyncExtraCooldowns()
     UpdateCollapseTab()   -- 条目数 / 生长方向 / 收起状态可能都变了，同步一下开关
     return #entries, fail
 end
 
 -- 收起所有扩展按钮（模块被总开关关掉时用）。战斗中不动安全框，等脱战重建时处理。
 local function HideExtraButtons()
+    StopExtraCooldowns()
     if button and button.collapseTab then button.collapseTab:Hide() end
     if InCombatLockdown() then
         pendingRebuild = true
@@ -1097,6 +1130,7 @@ local function SetupButtonEvents()
 end
 
 local function TeardownButtonEvents()
+    StopExtraCooldowns()
     if button then button:UnregisterAllEvents() end
 end
 
