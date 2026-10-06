@@ -397,7 +397,7 @@ local function SetDisplayPolling(active, interval)
         if displayTask.timer and displayInterval == interval then return end
         if displayTask.timer then displayTask.timer:Cancel() end
         displayInterval = interval
-        displayTask.timer = C_Timer.NewTicker(interval, DisplayTick)
+        displayTask.timer = C_Timer.NewTicker(interval, function() return DisplayTick() end)
     elseif displayTask.timer then
         displayTask.timer:Cancel()
         displayTask.timer = nil
@@ -705,3 +705,20 @@ ns.RegisterModule({
     end,
     BuildOptions = BuildOptions,
 })
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("Coord", targetEv, "OnEvent") end
+
+if ns.StartupWatchSlot then ns.StartupWatchSlot("Coord/Refresh", displayTask, "run") end
+
+-- Manual current-run attribution: no wrapping or timing while diagnostics are off.
+if ns.PerfWatchFunction then
+    ns.PerfWatchFunction("Coord/GetPlayerPos", function() return GetPlayerPos end, function(fn) GetPlayerPos=fn end)
+    ns.PerfWatchFunction("Coord/GetSpeedPercent", function() return GetSpeedPercent end, function(fn) GetSpeedPercent=fn end)
+    ns.PerfWatchFunction("Coord/RangeString", function() return RangeString end, function(fn) RangeString=fn end)
+    ns.PerfWatchFunction("Coord/DisplayDirty", function() return DisplayDirty end, function(fn) DisplayDirty=fn end)
+    ns.PerfWatchFunction("Coord/SetDisplayPolling", function() return SetDisplayPolling end, function(fn) SetDisplayPolling=fn end)
+    ns.PerfWatchFunction("Coord/DB", function() return DB end, function(fn) DB=fn end)
+    ns.PerfWatchFunction("Coord/Timer", function() return DisplayTick end, function(fn) DisplayTick=fn end)
+end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("CoordShout.lua") end

@@ -88,30 +88,40 @@ local function LayoutDB() return ns.GetLayoutDB(MODULE_ID, DB().button) end
 -- 坐骑查询/召唤
 --------------------------------------------------------------------------------
 
--- 当前正在骑的 mountID（没骑返回 nil）。用缓存避免每次全表扫描。
-local ownedCache     -- { byName = {}, bySpell = {} }，NEW_MOUNT_ADDED / 登录后重建
-local activeCache    -- 当前 isActive 的 mountID，MODIFIER 无关，随坐骑事件刷新
+-- Ownership/name lookup and current mount have different lifetimes. Riding
+-- must not invalidate a large name index; neither index is needed at login.
+local ownedCache     -- { byName = {}, bySpell = {} }, built on demand
+local activeCache, activeCacheValid
+local function InvalidateMountCache()
+    ownedCache = nil
+    activeCache, activeCacheValid = nil, false
+end
 
 local function RebuildMountCache()
     local byName, bySpell = {}, {}
-    activeCache = nil
     if C_MountJournal and C_MountJournal.GetMountIDs then
         for _, id in ipairs(C_MountJournal.GetMountIDs()) do
-            local name, spellID, _, isActive, _, _, _, _, _, _, isCollected = C_MountJournal.GetMountInfoByID(id)
+            local name, spellID, _, _, _, _, _, _, _, _, isCollected = C_MountJournal.GetMountInfoByID(id)
             if isCollected then
                 if name then byName[name] = id end
                 if spellID then bySpell[spellID] = id end
             end
-            if isActive then activeCache = id end
         end
     end
     ownedCache = { byName = byName, bySpell = bySpell }
 end
 
--- 当前正在骑的 mountID（没骑返回 nil）。优先读缓存，缓存还没建就现扫一次。
+-- Only "capture current" needs an active-mount scan. Cache an unmounted
+-- result too, and stop as soon as the active entry is found.
 local function GetActiveMountID()
-    if ownedCache then return activeCache end
-    RebuildMountCache()
+    if activeCacheValid then return activeCache end
+    activeCache, activeCacheValid = nil, true
+    if C_MountJournal and C_MountJournal.GetMountIDs and C_MountJournal.GetMountInfoByID then
+        for _, id in ipairs(C_MountJournal.GetMountIDs()) do
+            local _, _, _, isActive = C_MountJournal.GetMountInfoByID(id)
+            if isActive then activeCache = id; break end
+        end
+    end
     return activeCache
 end
 
@@ -129,7 +139,7 @@ local function BuildOwned()
     return ownedCache.byName, ownedCache.bySpell
 end
 
--- 解析某用途实际要召唤的 mountID：手动设的优先，其次按名字匹配，最后按 spellID 兜底。
+-- 解析某用途实际要召唤的 mountID：手动设的优先，自动用途优先按稳定法术 ID 查询。
 -- 设置里允许直接填「坐骑名」或「mountID」：数字直接用；文字按名字在已收藏坐骑里查
 -- （与扩展按钮那套名称匹配同一思路，省掉"必须先骑上目标坐骑才能绑定"的限制）。
 local function ResolveStoredMount(v)
@@ -145,14 +155,26 @@ local function ResolveMount(cat)
     local id = ResolveStoredMount(DB().mounts[cat])
     if id then return id end
 
+    local spells, names = AUTO_BY_SPELL[cat], AUTO_BY_NAME[cat]
+    -- Unbound flight is SummonByID(0); resolving it never needs ownership data.
+    if not spells and not names then return nil end
+    if spells and C_MountJournal and C_MountJournal.GetMountFromSpell then
+        for _, sid in ipairs(spells) do
+            local mid = C_MountJournal.GetMountFromSpell(sid)
+            if mid then
+                local _, _, _, _, _, _, _, _, _, _, collected = C_MountJournal.GetMountInfoByID(mid)
+                if collected then return mid end
+            end
+        end
+        return nil -- available API, but no owned candidate; no full-journal fallback
+    end
+    -- Compatibility fallback for clients without the direct spell lookup.
     local byName, bySpell = BuildOwned()
-    local spells = AUTO_BY_SPELL[cat]
     if spells then
         for _, sid in ipairs(spells) do
             if bySpell[sid] then return bySpell[sid] end
         end
     end
-    local names = AUTO_BY_NAME[cat]
     if names then
         for _, nm in ipairs(names) do
             if byName[nm] then return byName[nm] end
@@ -161,19 +183,13 @@ local function ResolveMount(cat)
     return nil
 end
 
--- 某用途对应坐骑的图标；解析不到具体坐骑（如飞行用随机）就退回收藏里第一只的图标，
--- 再不行给个通用坐骑图标。
+-- A resolved mount uses its own icon. Random/unresolved actions use a stable
+-- generic icon, not a full collection scan just to choose a decorative favorite.
 local function CategoryIcon(cat)
     local id = ResolveMount(cat)
     if id then
         local _, _, icon = C_MountJournal.GetMountInfoByID(id)
         if icon then return icon end
-    end
-    -- 飞行/随机：拿第一只收藏且设为偏好的坐骑图标当代表（用缓存，不全表扫）。
-    local byName = BuildOwned()
-    for _, mid in pairs(byName) do
-        local _, _, ic, _, _, _, isFav = C_MountJournal.GetMountInfoByID(mid)
-        if isFav and ic then return ic end
     end
     return "Interface\\ICONS\\Ability_Mount_RidingHorse"
 end
@@ -383,18 +399,51 @@ local PREFIX_KIND = {
 -- clear the user's search/filters just to resolve a shortcut. Keep successful
 -- names for this session and use item-cache lookup before the filtered scan.
 local toyNameIDs, toyDataRequests = {}, {}
+local eventFrame
+local buttonEventsActive, toyEventActive = false, false
+local pendingToyCount = 0
+local requestedToys -- demand collected by the current (possibly nested) rebuild
+local function SyncToyEvent()
+    local needed = buttonEventsActive and pendingToyCount > 0
+    if needed == toyEventActive then return end
+    toyEventActive = needed
+    if needed then eventFrame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+    elseif eventFrame then eventFrame:UnregisterEvent("ITEM_DATA_LOAD_RESULT") end
+end
+local function FinishToyRequest(id)
+    if toyDataRequests[id] ~= true then return end
+    toyDataRequests[id] = false -- do not retry a failed request on every refresh
+    pendingToyCount = pendingToyCount - 1
+    SyncToyEvent()
+end
+-- Forget unused pending requests, not failed attempts. Re-adding a removed toy
+-- may need a new request because its completion could arrive while unsubscribed.
+local function ReleaseUnusedToyRequests(wanted)
+    for id, pending in pairs(toyDataRequests) do
+        if pending == true and not (wanted and wanted[id]) then
+            toyDataRequests[id] = nil
+            pendingToyCount = pendingToyCount - 1
+        end
+    end
+    SyncToyEvent()
+end
 -- Verified item ID; also resolves our built-in example on a cold name cache.
 local knownToyNames = { ["奥术秘社的私人钥匙"] = 253629, [T["奥术秘社的私人钥匙"]] = 253629 }
 local function ToyInfo(id)
     if not (id and C_ToyBox and C_ToyBox.GetToyInfo) then return nil end
     local _, name, icon = C_ToyBox.GetToyInfo(id)
-    if name then toyNameIDs[name] = id end
+    if name then toyNameIDs[name] = id; FinishToyRequest(id) end
     return name, icon
 end
 local function RequestToyData(id)
-    if toyDataRequests[id] == nil and C_Item and C_Item.RequestLoadItemDataByID then
+    if requestedToys then requestedToys[id] = true end
+    if buttonEventsActive and DB().button.enabled and DB().extra.enabled
+        and toyDataRequests[id] == nil and C_Item and C_Item.RequestLoadItemDataByID then
         toyDataRequests[id] = true -- set before requesting; completion may be immediate
-        C_Item.RequestLoadItemDataByID(id)
+        pendingToyCount = pendingToyCount + 1
+        SyncToyEvent()
+        local ok = pcall(C_Item.RequestLoadItemDataByID, id)
+        if not ok then FinishToyRequest(id) end
     end
 end
 local function FindToyByName(name)
@@ -455,8 +504,10 @@ end
 -- 网上流传的玩具 ID 常常是 wowhead 法术页上的“使用法术 ID”（例如
 -- 战团银行距离抑制器 = 法术 460905，玩具物品 ID 是 216665），按法术施放是用不了的；
 -- 这里用法术名去玩具箱里找同名玩具，找到就改按玩具处理，保证点击真的能用。
+local knownToySpells = { [460905] = 216665 } -- Warband Bank Distance Inhibitor
 local function ToyBySpellID(id)
     if not id then return nil end
+    if knownToySpells[id] then return knownToySpells[id] end
     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
     if not name then return nil end
     return FindToyByName(name)
@@ -489,10 +540,7 @@ end
 -- 数字 ID 的解析顺序：同名玩具 → 技能 → 玩具 → 物品。
 local function ResolveNumberId(id)
     local tid = ToyBySpellID(id)
-    if tid then
-        local toy = ResolveById("toy", tid)
-        if toy then return toy end
-    end
+    if tid then return ResolveById("toy", tid) end -- never cast a known toy's use-spell
     return ResolveById("spell", id)
         or ResolveById("toy", id)
         or ResolveById("item", id)
@@ -560,10 +608,11 @@ local function ParseExtraLineCore(line)
                 if kind == "item" then return ResolveById("item", id) end
                 if kind == "toy" then
                     -- 玩具：先当玩具物品 ID，再兜底“使用法术 ID”
+                    if knownToySpells[id] then return ResolveById("toy", knownToySpells[id]) end
                     return ResolveById("toy", id) or ResolveNumberId(id)
                 end
                 -- 技能：法术 ID 优先，但同名玩具（玩具的使用法术 ID）会被识别成玩具
-                return ResolveNumberId(id) or ResolveById("spell", id)
+                return ResolveNumberId(id)
             elseif kind == "toy" then
                 local tid = FindToyByName(value)
                 return tid and ResolveById("toy", tid)
@@ -774,23 +823,54 @@ local extraButtons = {}
 
 -- Diagnostic dispatch only: no extra timer and no changes to secure handlers.
 ns.IdleTasks = ns.IdleTasks or {}
-local cooldownTask = {run=PaintCooldown, profileRefresh=true}
+local cooldownTask = {run=PaintCooldown, profileRefresh=true, adaptiveCadence=true}
 ns.IdleTasks.QuickCooldown = cooldownTask
 
--- One non-secure timer owns refresh cadence. Secure action buttons have no
--- per-frame cooldown handlers; keep the existing reads/secret-value policy.
+-- One non-secure timer: the engine animates cooldowns, including opaque
+-- duration objects. Events request one coalesced refresh within 0.25 s; all
+-- visible spell/item/toy buttons otherwise use a 2 s safety poll. Never keep
+-- polling at 4 Hz merely because a cooldown is active or cannot be inspected.
+local cooldownEventsActive = false
+local function SyncExtraCooldownEvents(needed)
+    needed = needed and buttonEventsActive or false
+    if needed == cooldownEventsActive then return end
+    cooldownEventsActive = needed
+    if needed then
+        eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+        eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
+        eventFrame:RegisterEvent("BAG_UPDATE_COOLDOWN")
+        eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    elseif eventFrame then
+        eventFrame:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
+        eventFrame:UnregisterEvent("SPELL_UPDATE_CHARGES")
+        eventFrame:UnregisterEvent("BAG_UPDATE_COOLDOWN")
+        eventFrame:UnregisterEvent("PLAYER_REGEN_DISABLED")
+    end
+end
+
 local function StopExtraCooldowns()
     if cooldownTask.timer then
         cooldownTask.timer:Cancel()
         cooldownTask.timer = nil
     end
+    cooldownTask.interval = nil
+    SyncExtraCooldownEvents(false)
 end
 
 local function NeedsExtraCooldown(b)
     return b._entry and b._entry.kind ~= "macro" and b:IsVisible()
 end
 
-local function RefreshExtraCooldowns()
+local RefreshExtraCooldowns
+local function SetExtraCooldownInterval(interval)
+    -- Repeated events must neither add timers nor postpone the next refresh.
+    if cooldownTask.timer and cooldownTask.interval == interval then return end
+    if cooldownTask.timer then cooldownTask.timer:Cancel() end
+    cooldownTask.interval = interval
+    cooldownTask.timer = C_Timer.NewTicker(interval, function() return RefreshExtraCooldowns() end)
+end
+
+RefreshExtraCooldowns = function()
     if not ns.IsModuleEnabled(MODULE_ID) then StopExtraCooldowns(); return end
     local any = false
     for _, b in ipairs(extraButtons) do
@@ -799,21 +879,29 @@ local function RefreshExtraCooldowns()
             cooldownTask.run(b.cd, b._entry)
         end
     end
-    if not any then StopExtraCooldowns() end
+    if not any then StopExtraCooldowns(); return end
+    SyncExtraCooldownEvents(true)
+    -- Keep BMPerf compare's captured timer/cadence stable while it pauses run.
+    if not cooldownTask.freezeCadence then SetExtraCooldownInterval(2) end
 end
 
 local function SyncExtraCooldowns()
+    local any = false
     if ns.IsModuleEnabled(MODULE_ID) then
         for _, b in ipairs(extraButtons) do
             if NeedsExtraCooldown(b) then
-                if not cooldownTask.timer then
-                    cooldownTask.timer = C_Timer.NewTicker(0.25, RefreshExtraCooldowns)
-                end
-                return
+                any = true
+                break
             end
         end
     end
-    StopExtraCooldowns()
+    if not any then StopExtraCooldowns(); return end
+    SyncExtraCooldownEvents(true)
+    SetExtraCooldownInterval(0.25) -- show/rebuild/reenable request one prompt pass
+end
+
+local function WakeExtraCooldowns()
+    if cooldownTask.timer then SetExtraCooldownInterval(0.25) end
 end
 
 local function EnsureExtraButton(index)
@@ -977,11 +1065,12 @@ end
 
 -- The external text control shows the next action or an explicit pending request.
 -- Visibility changes to secure extension buttons are deferred until combat ends.
-local function UpdateCollapseTab()
+local function UpdateCollapseTab(recognizedCount)
     local tab = button and button.collapseTab
     if not tab then return end
     local cfg = DB().extra
-    local ok = select(1, CountExtra(cfg.text))   -- 已识别条目数
+    local ok = recognizedCount
+    if ok == nil then ok = select(1, CountExtra(cfg.text)) end
     local canShow = ns.IsModuleEnabled(MODULE_ID) and DB().button.enabled
         and cfg.enabled and ok > 0
     if not canShow then tab:Hide() return end
@@ -998,10 +1087,18 @@ local function UpdateCollapseTab()
     if GameTooltip:IsOwned(tab) and GameTooltip:IsShown() then tab:GetScript("OnEnter")(tab) end
 end
 
+-- API-provided visuals are only comparable when both values are public.
+local function SamePublicValue(a, b)
+    return not issecretvalue(a) and not issecretvalue(b) and a == b
+end
+
 -- 按当前配置重建扩展按钮，返回（成功数, 未识别数）。
 -- 安全属性只能在非战斗锁定状态下写：战斗中先挂起，脱战（PLAYER_REGEN_ENABLED）自动补上。
 local function RebuildExtraButtons()
     if not button then return 0, 0 end
+    local cfg = DB().extra
+    local enabled = ns.IsModuleEnabled(MODULE_ID) and DB().button.enabled and cfg.enabled
+    if not enabled then ReleaseUnusedToyRequests() end -- safe even in combat
     if InCombatLockdown() then
         pendingRebuild = true
         return 0, 0
@@ -1009,17 +1106,29 @@ local function RebuildExtraButtons()
     pendingRebuild = nil
     appliedCollapsed=DB().extra.collapsed and true or false
 
-    local cfg = DB().extra
-    -- 主按钮关掉 / 模块关掉 / 扩展开关关掉 / 手动收起，四种情况都不显示那排按钮
-    local shown = ns.IsModuleEnabled(MODULE_ID) and DB().button.enabled
-        and cfg.enabled and not cfg.collapsed
+    -- Collapsed entries still need secure actions prepared out of combat.
+    -- Disabled entries do not need parsing, metadata requests or new buttons.
+    local shown = not not (enabled and not cfg.collapsed)
     local entries, fail = {}, 0
-    for _, line in ipairs(EachExtraLine(cfg.text)) do
-        local good, entry = pcall(ParseExtraLine, line)
-        if good and entry then
-            entries[#entries + 1] = entry
+    if enabled then
+        local parentRequests = requestedToys
+        local wanted = {}
+        requestedToys = wanted
+        for _, line in ipairs(EachExtraLine(cfg.text)) do
+            local good, entry = pcall(ParseExtraLine, line)
+            if good and entry then
+                entries[#entries + 1] = entry
+            else
+                fail = fail + 1
+            end
+        end
+        requestedToys = parentRequests
+        -- Synchronous item completion can re-enter this function. Only the
+        -- outer pass has seen all configured lines and may prune old demand.
+        if parentRequests then
+            for id in pairs(wanted) do parentRequests[id] = true end
         else
-            fail = fail + 1
+            ReleaseUnusedToyRequests(wanted)
         end
     end
 
@@ -1033,18 +1142,31 @@ local function RebuildExtraButtons()
     local prev = button
     for i, entry in ipairs(entries) do
         local b = EnsureExtraButton(i)
-        ApplySecureAttrs(b, entry)
-        b._entry = entry
-        -- An entry may have changed kind while reusing a secure button.
-        ClearExtraCooldown(b.cd)
-        b.icon:SetTexture(entry.icon)
-        b.label:SetText(ShortLabel(entry))
-        b:ClearAllPoints()
-        b:SetPoint(anchor.point, prev, anchor.rel, anchor.dx * gap, anchor.dy * gap)
-        b:SetScale(scale)      -- 挂在 UIParent 上不会继承主按钮缩放，这里手动同步
-        b:SetFrameLevel(button:GetFrameLevel() + i)
-        b:SetShown(shown)
-        b.label:SetShown(shown and cfg.showLabels ~= false)
+        local old = b._entry
+        -- Events may refresh names/icons without changing the secure action.
+        -- Preserve an unchanged cooldown; only a new action invalidates it.
+        if not old or not (SamePublicValue(old.kind, entry.kind)
+            and SamePublicValue(old.id, entry.id) and SamePublicValue(old.macrotext, entry.macrotext)) then
+            ApplySecureAttrs(b, entry)
+            ClearExtraCooldown(b.cd)
+        end
+        if not old or not SamePublicValue(old.icon, entry.icon) then b.icon:SetTexture(entry.icon) end
+        b._entry = entry -- tooltips must always see the latest resolved data
+        local label = ShortLabel(entry)
+        if not SamePublicValue(b.label:GetText(), label) then b.label:SetText(label) end
+        -- Extra buttons cannot be dragged independently. Keep only the applied
+        -- layout key on each pooled button, not a persistent parse-result cache.
+        if b._bmExtraAnchor ~= anchor or b._bmExtraRelative ~= prev or b._bmExtraGap ~= gap then
+            b:ClearAllPoints()
+            b:SetPoint(anchor.point, prev, anchor.rel, anchor.dx * gap, anchor.dy * gap)
+            b._bmExtraAnchor, b._bmExtraRelative, b._bmExtraGap = anchor, prev, gap
+        end
+        if b:GetScale() ~= scale then b:SetScale(scale) end
+        local level = button:GetFrameLevel() + i
+        if b:GetFrameLevel() ~= level then b:SetFrameLevel(level) end
+        if b:IsShown() ~= shown then b:SetShown(shown) end
+        local labelShown = shown and cfg.showLabels ~= false
+        if b.label:IsShown() ~= labelShown then b.label:SetShown(labelShown) end
         prev = b
     end
     -- 多余的池按钮收起备用（不清属性，下次重建会重新写）
@@ -1055,7 +1177,7 @@ local function RebuildExtraButtons()
         b._entry = nil
     end
     SyncExtraCooldowns()
-    UpdateCollapseTab()   -- 条目数 / 生长方向 / 收起状态可能都变了，同步一下开关
+    UpdateCollapseTab(#entries) -- reuse this pass; do not resolve every line again
     return #entries, fail
 end
 
@@ -1077,7 +1199,7 @@ end
 local function SetCollapsed(v)
     DB().extra.collapsed = v and true or false
     RebuildExtraButtons()   -- 非战斗：立即显隐；战斗：挂起，脱战自动补
-    UpdateCollapseTab()
+    if InCombatLockdown() then UpdateCollapseTab() end
     local m=ns.modules[MODULE_ID]
     if m and m._syncLayout then m._syncLayout:SyncAll() end
 end
@@ -1094,44 +1216,68 @@ local function UpdateButton()
     button:RefreshIcon()
 end
 
--- 事件注册/注销成对：模块被总开关关掉后就不再收事件（否则每次按修饰键、上下马都要白跑一遍）。
+-- Keep event ownership outside the button/secure-anchor hierarchy. The main
+-- button can become protected after extension buttons are attached; temporary
+-- diagnostics must never need to replace its scripts to stop capture.
+local function OnButtonEvent(_, event, itemID)
+    if event == "SPELL_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_CHARGES"
+        or event == "BAG_UPDATE_COOLDOWN" or event == "PLAYER_REGEN_DISABLED" then
+        WakeExtraCooldowns()
+        return -- cooldown events never rebuild secure buttons or sync editors
+    end
+    if event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
+        WakeExtraCooldowns() -- also works when combat defers the rebuild
+    end
+    if event == "ITEM_DATA_LOAD_RESULT" then
+        if toyDataRequests[itemID] == true then
+            FinishToyRequest(itemID)
+            RebuildExtraButtons() -- retains the existing combat deferral
+        else
+            return
+        end
+    elseif event == "MODIFIER_STATE_CHANGED" then
+        button:RefreshIcon()
+    elseif event == "NEW_MOUNT_ADDED" or event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
+        if event == "NEW_MOUNT_ADDED" then ownedCache = nil end
+        activeCache, activeCacheValid = nil, false
+        button:RefreshIcon()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        if pendingRebuild then RebuildExtraButtons() end
+    else
+        RebuildExtraButtons()                 -- 玩具/技能数据就绪或变动：重建扩展按钮
+    end
+    if event ~= "MODIFIER_STATE_CHANGED" and extraEditor and extraEditor:IsVisible() then
+        extraEditor:Sync()
+    end
+end
+
+-- One receiver for the module lifetime; disabled modules receive no events.
 local function SetupButtonEvents()
     if not button then return end
-    button:RegisterEvent("MODIFIER_STATE_CHANGED")
-    button:RegisterEvent("NEW_MOUNT_ADDED")       -- 新坐骑入收藏：重建缓存
-    button:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")  -- 上/下马：刷新激活缓存
-    button:RegisterEvent("TOYS_UPDATED")          -- 玩具变动：扩展按钮重新解析
-    button:RegisterEvent("ITEM_DATA_LOAD_RESULT") -- 仅重试本模块请求过的玩具数据
-    button:RegisterEvent("SPELLS_CHANGED")        -- 技能变动：扩展按钮重新解析
-    button:RegisterEvent("PLAYER_ENTERING_WORLD") -- 登录切换：数据就绪后重试解析
-    button:RegisterEvent("PLAYER_REGEN_ENABLED")  -- 脱战：补上战斗中挂起的扩展按钮重建
-    button:SetScript("OnEvent", function(self, event, itemID)
-        if event == "ITEM_DATA_LOAD_RESULT" then
-            if toyDataRequests[itemID] == true then
-                toyDataRequests[itemID] = false -- no repeated requests on failure
-                RebuildExtraButtons() -- retains the existing combat deferral
-            else
-                return
-            end
-        elseif event == "MODIFIER_STATE_CHANGED" then
-            self:RefreshIcon()
-        elseif event == "NEW_MOUNT_ADDED" or event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
-            ownedCache = nil                      -- 失效缓存，下次用的时候重建
-            self:RefreshIcon()
-        elseif event == "PLAYER_REGEN_ENABLED" then
-            if pendingRebuild then RebuildExtraButtons() end
-        else
-            RebuildExtraButtons()                 -- 玩具/技能数据就绪或变动：重建扩展按钮
-        end
-        if event ~= "MODIFIER_STATE_CHANGED" and extraEditor and extraEditor:IsVisible() then
-            extraEditor:Sync()
-        end
-    end)
+    if not eventFrame then
+        eventFrame = CreateFrame("Frame", "BaimiaoQuickMountEvents")
+        eventFrame:SetScript("OnEvent", OnButtonEvent)
+        if ns.PerfWatchFrame then ns.PerfWatchFrame("QuickMount", eventFrame, "OnEvent") end
+    end
+    eventFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+    eventFrame:RegisterEvent("NEW_MOUNT_ADDED")
+    eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+    eventFrame:RegisterEvent("TOYS_UPDATED")
+    buttonEventsActive = true
+    SyncToyEvent()
+    eventFrame:RegisterEvent("SPELLS_CHANGED")
+    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    SyncExtraCooldowns()
 end
 
 local function TeardownButtonEvents()
     StopExtraCooldowns()
-    if button then button:UnregisterAllEvents() end
+    if eventFrame then eventFrame:UnregisterAllEvents() end
+    buttonEventsActive, toyEventActive = false, false
+    -- A disabled receiver can miss completion; allow unresolved toys to retry.
+    for id,pending in pairs(toyDataRequests) do if pending == true then toyDataRequests[id] = nil end end
+    pendingToyCount = 0
 end
 
 local function CreateButton()
@@ -1755,7 +1901,7 @@ ns.RegisterModule({
     desc = T["一键快捷：一个按钮按自定义点击组合键召唤飞行/修理/拍卖行/载人/水下坐骑（坐骑可抓取或直接填名字）；旁边还能长出技能 / 玩具 / 物品 / 小退·退组·重载等自定义按钮。"],
     defaults = defaults,
     OnEnable = function()
-        RebuildMountCache()  -- 登录时建一次坐骑缓存，之后按需重建
+        InvalidateMountCache() -- login is not a request for the whole collection
         CreateButton()
         SetupButtonEvents()
         UpdateButton()
@@ -1773,8 +1919,23 @@ ns.RegisterModule({
     OnToggle = function(_, on)
         -- 重新启用时 Core 只调 OnToggle（不调 OnEnable），事件要在这里补回来；
         -- 关闭时也顺手摘一遍，保证不管调用顺序如何状态都一致。
-        if on then SetupButtonEvents() else TeardownButtonEvents() end
+        if on then InvalidateMountCache(); SetupButtonEvents() else TeardownButtonEvents() end
         Refresh()
     end,
     BuildOptions = BuildOptions,
 })
+
+if ns.StartupWatchSlot then ns.StartupWatchSlot("QuickCooldown/Refresh", cooldownTask, "run") end
+
+-- Manual current-run attribution: no wrapping or timing while diagnostics are off.
+if ns.PerfWatchFunction then
+    ns.PerfWatchFunction("QuickMount/SetExtraDurationObject", function() return SetExtraDurationObject end, function(fn) SetExtraDurationObject=fn end)
+    ns.PerfWatchFunction("QuickMount/SetExtraNumericCooldown", function() return SetExtraNumericCooldown end, function(fn) SetExtraNumericCooldown=fn end)
+    ns.PerfWatchFunction("QuickMount/ClearExtraCooldown", function() return ClearExtraCooldown end, function(fn) ClearExtraCooldown=fn end)
+    ns.PerfWatchFunction("QuickMount/SetExtraCooldownInterval", function() return SetExtraCooldownInterval end, function(fn) SetExtraCooldownInterval=fn end)
+    ns.PerfWatchFunction("QuickMount/DB", function() return DB end, function(fn) DB=fn end)
+    ns.PerfWatchFunction("QuickMount/GetItemCooldownFn", function() return GetItemCooldownFn end, function(fn) GetItemCooldownFn=fn end)
+    ns.PerfWatchFunction("QuickMount/Timer", function() return RefreshExtraCooldowns end, function(fn) RefreshExtraCooldowns=fn end)
+end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("QuickMount.lua") end

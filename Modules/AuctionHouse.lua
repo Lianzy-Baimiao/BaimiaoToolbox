@@ -1,6 +1,9 @@
 -- One click authorizes exactly one item/quantity up to the displayed estimate.
 -- The quote event may confirm that authorization, never start another purchase.
 local _, ns = ...
+-- Startup-only local timer view; restored to the untouched global API on stop.
+local C_Timer = C_Timer
+if ns.StartupTimerScope then ns.StartupTimerScope("Auction", C_Timer, function(api) C_Timer = api end) end
 local T = ns.L
 local A=ns.AuctionHouse
 local ID="auctionhouse"
@@ -92,12 +95,53 @@ function A.Stop(reason)
     enter("idle",reason or T["已停止"])
 end
 local requested={}
+local pendingItemCount=0
+local itemViews={}
+local itemEventsActive=false
+local function syncItemEvents()
+    -- Global item notifications include every other addon/native cache load.
+    -- Listen only for our pending requests or a visible consumer (which also
+    -- needs to recover metadata that previously failed to load).
+    local needed=started and (open or pendingItemCount>0 or next(itemViews)~=nil)
+    if needed==itemEventsActive then return end
+    itemEventsActive=needed
+    if needed then
+        events:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+        events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    else
+        events:UnregisterEvent("ITEM_DATA_LOAD_RESULT")
+        events:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+    end
+end
+function A.WatchItemDataView(frame)
+    local function changed(self)
+        itemViews[self]=self:IsVisible() or nil
+        syncItemEvents()
+    end
+    frame:HookScript("OnShow",changed)
+    frame:HookScript("OnHide",function(self)itemViews[self]=nil;syncItemEvents()end)
+    changed(frame)
+end
+local function finishItemRequest(id,value)
+    if requested[id]==true then pendingItemCount=pendingItemCount-1 end
+    requested[id]=value
+    syncItemEvents()
+end
 function A.ItemName(id)
     if not id then return nil end
     local name=read(C_Item and C_Item.GetItemInfo or GetItemInfo,id)
-    if type(name)=="string" then return name end
-    if requested[id]==nil then
-        requested[id]=true;read(C_Item and C_Item.RequestLoadItemDataByID,id)
+    if type(name)=="string" then
+        if requested[id]~=nil then finishItemRequest(id,nil)end
+        return name
+    end
+    if started and requested[id]==nil then
+        local request=C_Item and C_Item.RequestLoadItemDataByID
+        if type(request)=="function"then
+            requested[id]=true;pendingItemCount=pendingItemCount+1
+            syncItemEvents() -- subscribe before a possibly immediate completion
+            local ok=pcall(request,id)
+            if not ok and requested[id]==true then finishItemRequest(id,false)end
+        else requested[id]=false end
     end
     return T["物品 #"]..id
 end
@@ -385,11 +429,11 @@ end
 function A.HandleEvent(event,...)
     if event=="AUCTION_HOUSE_SHOW"then
         if open then if A.SyncPanel then A.SyncPanel()end;return end
-        open=true;spent=0;quoteTaint=false;A.Stop(T["选择快捷搜索，或开始按清单补货"]);if A.SyncPanel then A.SyncPanel()end
-    elseif event=="AUCTION_HOUSE_DISABLED"then open=false;A.Stop(T["拍卖行暂不可用"]);if A.SyncPanel then A.SyncPanel()end
-    elseif event=="AUCTION_HOUSE_CLOSED"then open=false;A.Stop(T["拍卖行已关闭"]);if A.SyncPanel then A.SyncPanel()end
+        open=true;syncItemEvents();spent=0;quoteTaint=false;A.Stop(T["选择快捷搜索，或开始按清单补货"]);if A.SyncPanel then A.SyncPanel()end
+    elseif event=="AUCTION_HOUSE_DISABLED"then open=false;syncItemEvents();A.Stop(T["拍卖行暂不可用"]);if A.SyncPanel then A.SyncPanel()end
+    elseif event=="AUCTION_HOUSE_CLOSED"then open=false;syncItemEvents();A.Stop(T["拍卖行已关闭"]);if A.SyncPanel then A.SyncPanel()end
     elseif event=="PLAYER_REGEN_DISABLED"then A.Stop(T["进入战斗，补货已停止"])
-    elseif event=="PLAYER_LEAVING_WORLD"then open=false;A.Stop(T["离开当前区域，已停止"])
+    elseif event=="PLAYER_LEAVING_WORLD"then open=false;syncItemEvents();A.Stop(T["离开当前区域，已停止"])
     elseif event=="MAIL_SHOW"then mailOpen=true;scanMail()
     elseif event=="MAIL_CLOSED"then mailOpen=false
     elseif event=="MAIL_INBOX_UPDATE"then scanMail()
@@ -435,8 +479,8 @@ function A.HandleEvent(event,...)
         -- Observe only data requested by this helper, not every item loaded by
         -- Blizzard's browse results (or another addon). Failures must not loop.
         if itemData and requested[itemID]~=nil then
-            if success==false then requested[itemID]=false
-            else requested[itemID]=nil;dirty=true end
+            if success==false then finishItemRequest(itemID,false)
+            else finishItemRequest(itemID,nil);dirty=true end
         end
         if itemData and success~=false and A.Recipes.InvalidateItem(itemID)then dirty=true end
         if success~=false then
@@ -487,12 +531,16 @@ local function enable()
     for _,event in ipairs({"AUCTION_HOUSE_SHOW","AUCTION_HOUSE_CLOSED","AUCTION_HOUSE_DISABLED","AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
         "COMMODITY_SEARCH_RESULTS_UPDATED","COMMODITY_SEARCH_RESULTS_ADDED","ITEM_SEARCH_RESULTS_UPDATED","ITEM_KEY_ITEM_INFO_RECEIVED","COMMODITY_PRICE_UPDATED","COMMODITY_PRICE_UNAVAILABLE",
         "COMMODITY_PURCHASE_SUCCEEDED","COMMODITY_PURCHASE_FAILED","COMMODITY_PURCHASED","MAIL_SHOW","MAIL_CLOSED","MAIL_INBOX_UPDATE",
-        "TRACKED_RECIPE_UPDATE","TRADE_SKILL_LIST_UPDATE","BAG_UPDATE_DELAYED","ITEM_DATA_LOAD_RESULT","GET_ITEM_INFO_RECEIVED","PLAYER_REGEN_DISABLED","PLAYER_REGEN_ENABLED","PLAYER_LEAVING_WORLD","ADDON_LOADED"})do events:RegisterEvent(event)end
-    hookAuctions()
+        "TRACKED_RECIPE_UPDATE","TRADE_SKILL_LIST_UPDATE","BAG_UPDATE_DELAYED","PLAYER_REGEN_DISABLED","PLAYER_REGEN_ENABLED","PLAYER_LEAVING_WORLD","ADDON_LOADED"})do events:RegisterEvent(event)end
+    syncItemEvents();hookAuctions()
     if AuctionHouseFrame and AuctionHouseFrame:IsShown()then A.HandleEvent("AUCTION_HOUSE_SHOW")end
 end
 local function disable()
     A.Stop(T["拍卖行助手已停用"]);started=false;open=false;events:UnregisterAllEvents()
+    itemEventsActive=false
+    -- Completion while disabled must not strand a request across re-enable.
+    for id,pending in pairs(requested)do if pending==true then requested[id]=nil end end
+    pendingItemCount=0
     -- Events can finish while unsubscribed: release the runtime wait, retaining
     -- only this item's reservation instead of blocking all future purchases.
     reservePending();pendingAttempt=nil;uncertain=false
@@ -509,3 +557,7 @@ ns.RegisterModule({id=ID,name=T["拍卖行助手"],desc=T["常用物品快捷搜
     OnToggle=function(_,on)if on then enable()end end})
 SLASH_BAIMIAOAH1="/bmah"
 SlashCmdList.BAIMIAOAH=function()if A.ShowPanel then A.ShowPanel(true)end end
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("Auction", events, "OnEvent") end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("AuctionHouse.lua") end

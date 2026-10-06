@@ -16,7 +16,7 @@ A modular utility addon for World of Warcraft Retail. Keep useful shortcuts, rem
 - **Trade receipts:** A local chat summary of the partner, gold, items, and enchantment service after a confirmed successful trade. No channel spam or saved trade ledger.
 - **Aura and pet reminders:** Customize prompts for missing auras or pets.
 - **Bloodlust and battle resurrection:** Display available status information and battle-resurrection charges. Optional Bloodlust music supports up to 20 tracks, sequential/shuffled playback, or one randomly selected track per trigger, using registered media or configured sound paths.
-- **Spell-sequence reminders:** Save plans by specialization, show cooldown cues, and add optional notes below the icons. Single-target/AOE labels can appear together. Skill icons always stay on one line and shrink to fit if necessary; three Retribution Paladin presets are included. This is a passive reminder, not a dynamic rotation engine or automatic casting tool.
+- **Spell-sequence reminders:** Save plans by specialization, use static icons by default, and add optional notes below the icons. Cooldown and charge displays are opt-in through /bmrotation. Single-target/AOE labels can appear together. Skill icons always stay on one line and shrink to fit if necessary; three Retribution Paladin presets are included. This is a passive reminder, not a dynamic rotation engine or automatic casting tool.
 
 ## Mythic+ and group tools
 
@@ -43,7 +43,7 @@ Feature settings are account-wide; frame positions and lock settings are saved p
 
 Install the addon for your **Retail** game instance. For manual installation, place the **BaimiaoToolbox** folder in `World of Warcraft/_retail_/Interface/AddOns/`, with `BaimiaoToolbox.toc` directly inside it.
 
-When upgrading to **1.9.19**, fully exit the game before installation and restart it afterward to load the new diagnostic file. Keep your SavedVariables; no settings reset is required.
+When upgrading to **1.9.20**, fully exit the game before installation and restart it afterward. Keep your SavedVariables; no full settings reset is required. Existing spell-sequence cooldown settings switch off once on upgrade; you can re-enable them afterward, and your later choice is preserved.
 
 ## Compatibility and limits
 
@@ -67,7 +67,7 @@ The addon's own code is MIT-licensed; see LICENSE. The bundled modified LibDefla
 
 Settings pages load on demand, with reorganized groups and clearer save behavior. Auction item-data updates are coalesced and filtered to reduce unnecessary rebuilds. Background refreshes reduce redundant work without a promised fixed CPU or memory target.
 
-**Optional diagnostics:** Run /bmperf out of combat for a 30-second sample; /bmperf cancel stops it. It reports native recent metrics and selected callbacks, not complete per-module CPU usage. Profiling is opt-in and results are not persisted.
+**Optional diagnostics:** Run /bmperf out of combat for a 30-second sample; /bmperf cancel stops it. Reports distinguish native recent metrics from session averages and cover selected callbacks, not complete per-module CPU usage. Diagnostic reports can be saved for later inspection. Startup capture has a separate settings switch, defaults to off, and stops when complete.
 
 ---
 
@@ -91,7 +91,7 @@ Settings pages load on demand, with reorganized groups and clearer save behavior
 - **交易回执：**交易成功后，仅在本机聊天框显示对象、金币、物品及附魔服务摘要，不刷频道、不建立交易账本。
 - **光环 / 宠物提示：**提醒缺失光环或宠物，支持自定义提示。
 - **嗜血 / 战复监控：**显示可获取的状态信息和战复次数；嗜血音乐支持最多 20 首，按列表顺序、随机顺序或每次随机选一首播放，可使用共享媒体或自定义路径。
-- **循环提示助手：**按专精保存方案、显示冷却，可在技能下方显示方案备注；支持单体 / AOE 同时标注，技能图标始终单行，过长自动缩小。附带三套惩戒骑预设，仅作被动顺序提醒，不是动态输出推荐，也不会自动施法。
+- **循环提示助手：**按专精保存方案，默认显示静态图标，可在技能下方显示方案备注；冷却与充能显示可通过 /bmrotation 手动开启；支持单体 / AOE 同时标注，技能图标始终单行，过长自动缩小。附带三套惩戒骑预设，仅作被动顺序提醒，不是动态输出推荐，也不会自动施法。
 
 ### 大秘境与团队工具
 
@@ -118,7 +118,7 @@ Settings pages load on demand, with reorganized groups and clearer save behavior
 
 请安装到**正式服**客户端。手动安装时，将 **BaimiaoToolbox** 文件夹放入 `World of Warcraft/_retail_/Interface/AddOns/`，确保 `BaimiaoToolbox.toc` 直接位于该文件夹内。
 
-升级到 **1.9.19** 时，请完全退出游戏后安装，再重新进入，以加载新增诊断文件。保留 SavedVariables，无需清空或重置设置。
+升级到 **1.9.20** 时，请完全退出游戏后安装，再重新进入。保留 SavedVariables，无需清空设置；已有循环冷却配置仅在升级时关闭一次，之后可手动重新开启并保存选择。
 
 ### 兼容性与限制
 
@@ -142,4 +142,4 @@ Settings pages load on demand, with reorganized groups and clearer save behavior
 
 设置页按需创建，重新整理分组与保存提示。拍卖行物品数据更新合并处理并过滤无关事件，减少不必要的界面重建；后台刷新减少重复工作，不承诺固定 CPU 降幅或内存上限。
 
-**可选诊断：**脱战时运行 /bmperf 采样 30 秒，/bmperf cancel 取消；仅覆盖部分回调，不是完整模块 CPU 排行，诊断结果不写入存档。
+**可选诊断：**脱战时运行 /bmperf 采样 30 秒，/bmperf cancel 取消；区分原生近期与会话平均，仅覆盖部分回调，不是完整模块 CPU 排行。诊断报告可保存供后续检查；启动采集有独立设置开关，默认关闭，完成即停止。

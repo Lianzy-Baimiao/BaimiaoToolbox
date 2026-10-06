@@ -162,7 +162,9 @@ local function selectPage(key)
     workspace.heading:SetText(m and m.name or (key=="appearance" and T["外观设置"] or T["旅程，从容开始。"]))
     workspace.eyebrow:SetText(m and T["修改即时生效 · 输入框回车或失焦保存"] or (key=="appearance" and T["APPEARANCE / 全局外观"] or "YOUR ADVENTURE, ORGANIZED"))
     workspace.toggle:SetShown(m~=nil)
-    if m and m._syncLayout and not InCombatLockdown() then m._syncLayout:SyncAll() end
+    -- One owner for root synchronization: page selection, including workspace OnShow.
+    local layout=pages[key]._syncLayout
+    if layout and not InCombatLockdown() then layout:SyncAll() end
     refresh()
 end
 local function fitWindow()
@@ -193,7 +195,7 @@ end
 local function createOverview()
     local host=CreateFrame("Frame",nil,workspace.content)
     host:SetAllPoints(); pages.overview=host
-    local home=UI.MakeScrollable(host)
+    local home,scroll=UI.MakeScrollable(host)
     -- Keep the original identity/header; density comes from individual cards.
     local columns,gap=3,12
     local cardWidth=(738-(columns-1)*gap)/columns
@@ -237,6 +239,23 @@ local function createOverview()
     workspace.minimap:SetPoint("TOPLEFT",0,-footerY);workspace.minimap:SetHeight(28)
     local hint=text(home,T["Alt + 右键屏上工具可直达设置"],11,"muted")
     hint:SetPoint("TOPRIGHT",-2,-footerY-8)
+    -- Keep the overview compact; build this infrequently used section on demand.
+    local diagnostics
+    workspace.diagnostics=button(home,T["性能诊断"],180,function()
+        if not diagnostics then
+            diagnostics=CreateFrame("Frame",nil,home)
+            diagnostics:SetPoint("TOPLEFT",0,-footerY-44);diagnostics:SetWidth(738)
+            local layout=UI.NewLayout(diagnostics)
+            UI.BuildDiagnosticsOptions(layout)
+            layout:Finalize();host._syncLayout=layout;styleOptions(diagnostics)
+        else diagnostics:SetShown(not diagnostics:IsShown()) end
+        if diagnostics:IsShown() then
+            host._syncLayout:SyncAll()
+            home:SetHeight(footerY+44+diagnostics:GetHeight()+12)
+            scroll:SetVerticalScroll(math.max(0,home:GetHeight()-scroll:GetHeight()))
+        else home:SetHeight(footerY+40);scroll:SetVerticalScroll(0) end
+    end)
+    workspace.diagnostics:SetPoint("TOPLEFT",176,-footerY);workspace.diagnostics:SetHeight(28)
 end
 -- Slim scrollbars keep the options free of the default gold arrow ornaments.
 -- The scroll child's width never changes when the bar hides, so text stays aligned.
@@ -293,9 +312,8 @@ createModulePage=function(m)
         ns.Print(T["设置页构建失败："]..m.id.." / "..tostring(err))
         layout:Text(T["此模块设置加载失败，请记录 Lua 错误；其他模块仍可使用。"],false)
     end
-    layout:Finalize();layout:SyncAll();m._syncLayout=layout
+    layout:Finalize();m._syncLayout=layout;host._syncLayout=layout
     styleOptions(child)
-    host:SetScript("OnShow",function() if not InCombatLockdown() then layout:SyncAll() end end)
 end
 createAppearancePage=function()
     local host=CreateFrame("Frame",nil,workspace.content)
@@ -309,8 +327,7 @@ createAppearancePage=function()
     layout:Check(T["轮廓字体"],function() return UI.GetAppearanceDB().outline end,UI.SetRuntimeOutline)
     layout:Text(T["作用于坐标、提醒、图标数字等屏幕文字；浅色面板文字自动去除描边和阴影，保持清晰。"],true)
     layout:Text(T["不改变工具箱设置界面的字体，也不修改游戏原生聊天、菜单、鼠标提示或其他插件的字体。"],true)
-    layout:Finalize();layout:SyncAll();styleOptions(child)
-    host:SetScript("OnShow",function() if not InCombatLockdown() then layout:SyncAll() end end)
+    layout:Finalize();host._syncLayout=layout;styleOptions(child)
 end
 function UI.BuildWorkspace()
     if workspace or InCombatLockdown() then return end
@@ -415,11 +432,23 @@ function UI.InitializeSettings()
         UI.settingsCategory=category
     end
 end
+-- Read-only navigation snapshot for the opt-in UI replay.
+function UI.GetWorkspacePage() return current end
+function UI.RestoreClosedWorkspacePage(key)
+    if not workspace or not workspace:IsShown() then current=key or "overview" end
+end
 function UI.OpenWorkspace(moduleId)
     -- Check before constructing even the workspace shell.
     if combatMessage() then return end
     if not workspace then UI.BuildWorkspace() end
-    selectPage(moduleId or "overview");workspace:Show();workspace:Raise()
+    if workspace:IsShown() then
+        selectPage(moduleId or "overview")
+    else
+        -- OnShow selects/synchronizes the requested page, not the previously open one.
+        current=moduleId or "overview"
+        workspace:Show()
+    end
+    workspace:Raise()
 end
 
 -- Commit only the region being hidden, not another editor in the workspace.
@@ -429,8 +458,8 @@ function UI.CommitOptionsFocus(panel)
     if focus and focus.IsDescendantOf and focus:IsDescendantOf(panel) then focus:ClearFocus() end
 end
 
--- A terminal stack of settings groups, built once. Collapsing or disabling a
--- group only changes visibility/geometry; values and editor frames are retained.
+-- A terminal stack of settings groups. Bodies are built on first expansion;
+-- collapsing or disabling retains editors without synchronizing hidden controls.
 -- enabled/setEnabled add a persistent header switch; visible hides the whole
 -- group for dependent settings. collapsed is session-only presentation state.
 function UI.OptionGroups(panel,L,entries,onResize)
@@ -440,8 +469,21 @@ function UI.OptionGroups(panel,L,entries,onResize)
     local top=L.y
     local groups={}
     local ready,updating=false,false
-    local function reflow()
-        if not ready or updating then return end
+    local reflow
+    local function ensureBody(g)
+        if g.built then return end
+        g.built=true
+        if not g.entry.build then g.body:SetHeight(0);return end
+        local ok,err=pcall(g.entry.build,g.body,g.layout,reflow)
+        if not ok then
+            ns.Print(T["设置页构建失败："]..tostring(err))
+            g.layout:Text(T["此模块设置加载失败，请记录 Lua 错误；其他模块仍可使用。"],false)
+        end
+        g.layout:Finalize()
+        styleOptions(g.body)
+    end
+    reflow=function(sync)
+        if not ready or updating or InCombatLockdown() then return end
         updating=true
         local y,any=top,false
         for _,g in ipairs(groups) do
@@ -449,7 +491,13 @@ function UI.OptionGroups(panel,L,entries,onResize)
             local visible=not entry.visible or entry.visible()
             local enabled=not entry.enabled or entry.enabled()
             local expanded=visible and enabled and not g.collapsed
-            if not expanded then UI.CommitOptionsFocus(g.body) end
+            if expanded then
+                ensureBody(g)
+                if sync==true or (sync~=false and not g.expanded) then g.layout:SyncAll() end
+            else
+                UI.CommitOptionsFocus(g.body)
+            end
+            g.expanded=expanded
             g.frame:SetShown(visible)
             g.body:SetShown(expanded)
             if g.fold then
@@ -499,36 +547,57 @@ function UI.OptionGroups(panel,L,entries,onResize)
         body:SetPoint("TOPLEFT",0,-g.headerHeight);body:SetPoint("TOPRIGHT",0,-g.headerHeight)
         body:SetWidth(f:GetWidth());g.body=body
         local layout=UI.NewLayout(body);layout.y=-4;layout.indent=14;g.layout=layout
-        if entry.build then entry.build(body,layout,reflow) end
-        layout:Finalize()
-        if not entry.build then body:SetHeight(0) end
+        body:Hide();body:SetHeight(0)
         g.header=header
     end
     L.syncers[#L.syncers+1]=function()
-        for _,g in ipairs(groups) do g.header:SyncAll();g.layout:SyncAll() end
-        reflow()
+        if InCombatLockdown() then return end
+        for _,g in ipairs(groups) do g.header:SyncAll() end
+        reflow(true)
     end
-    ready=true;reflow()
+    ready=true;reflow(false)
     return {groups=groups,Refresh=reflow}
 end
 
--- Build each tab once: switching never destroys edit boxes or their drafts.
+-- Keep a cheap layout shell per tab; build controls only on first selection.
+-- Built pages retain their editors, but hidden pages never join root syncs.
 function UI.OptionTabs(panel,L,entries,onResize)
     local pages,buttons={},{}
-    local selected=1
+    local selected,building
     local top=L.y-38
     local function resize()
+        if building or not selected then return end
         L.y=top-pages[selected].panel:GetHeight()
         L:Finalize()
         if onResize then onResize() end
     end
-    local function selectPage(index)
+    local function ensurePage(index)
+        local page=pages[index]
+        if page._optionsBuilt then return end
+        page._optionsBuilt=true
+        local build=page._optionsBuild
+        page._optionsBuild=nil
+        building=true
+        local ok,err=pcall(build,page.panel,page,resize)
+        if not ok then
+            ns.Print(T["设置页构建失败："]..tostring(err))
+            page:Text(T["此模块设置加载失败，请记录 Lua 错误；其他模块仍可使用。"],false)
+        end
+        page:Finalize()
+        styleOptions(page.panel)
+        building=false
+    end
+    local function selectPage(index,initial)
+        if InCombatLockdown() or not pages[index] or building then return end
         selected=index
+        ensurePage(index)
         for i,page in ipairs(pages) do
             page.panel:SetShown(i==index)
             buttons[i]:SetEnabled(i~=index)
             buttons[i].tabIndicator:SetShown(i==index)
         end
+        -- The parent performs the initial sync after completing its builder.
+        if not initial then pages[index]:SyncAll() end
         resize()
         local scroll=panel:GetParent()
         if scroll and scroll.GetVerticalScroll and scroll.SetVerticalScroll then scroll:SetVerticalScroll(0) end
@@ -544,13 +613,18 @@ function UI.OptionTabs(panel,L,entries,onResize)
         UI.OnTheme(function() b.tabIndicator:SetColorTexture(unpack(UI.palette.accent)) end)
         local child=CreateFrame("Frame",nil,panel)
         child:SetPoint("TOPLEFT",0,top);child:SetPoint("TOPRIGHT",0,top)
-        child:SetWidth(panel:GetWidth())
+        child:SetWidth(panel:GetWidth());child:Hide()
         local layout=ns.UI.NewLayout(child)
         pages[i]=layout
-        entry.build(child,layout,function() if pages[selected] then resize() end end)
-        layout:Finalize()
+        layout._optionsBuild=entry.build
     end
-    L.syncers[#L.syncers+1]=function() for _,page in ipairs(pages) do page:SyncAll() end end
-    selectPage(1)
+    L.syncers[#L.syncers+1]=function()
+        if InCombatLockdown() or not selected then return end
+        pages[selected]:SyncAll()
+        resize()
+    end
+    selectPage(1,true)
     return {Select=selectPage,pages=pages,buttons=buttons}
 end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("Workspace.lua") end

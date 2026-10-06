@@ -2,6 +2,9 @@
 -- Does not replace Blizzard methods, touch other addons' saved settings, or cast
 -- from Lua. Teleports use hardware-click secure buttons, prepared out of combat.
 local ADDON, ns = ...
+-- Startup-only local timer view; restored to the untouched global API on stop.
+local C_Timer = C_Timer
+if ns.StartupTimerScope then ns.StartupTimerScope("MythicPlus", C_Timer, function(api) C_Timer = api end) end
 local T = ns.L
 local ID, D, UI = "mythicplus", ns.MythicPlusData, ns.UI
 local WHITE="Interface\\Buttons\\WHITE8x8"
@@ -11,6 +14,7 @@ local function DB() return ns.GetDB(ID,defaults) end
 local function Enabled() return ns.IsModuleEnabled(ID) and DB().show end
 local host, canvas, original, applied, snapshot
 local active, pending, queued, hooked, kogoHooked=false,false,false,false,nil
+local queuedFull,queuedParty,queuedKey=false,false,false
 local kogoWasShown=false
 local tiles, affixes, rows, vaults, painters = {},{},{},{},{}
 local page, rowOffset, mode=1,0,"runs"
@@ -24,6 +28,25 @@ local TILE_HEIGHT,TILE_PITCH=64,70
 local TILE_TOP=CONTENT_BOTTOM-3*TILE_PITCH-TILE_HEIGHT
 local Refresh, Queue, Render, HidePortals, RequestData, SyncEvents
 local events=CreateFrame("Frame")
+-- Presentation belongs to these pooled widgets. Remember only the last applied
+-- value, not historical snapshots; live game data is still read on every refresh.
+local function setText(f,value)
+    if f._bmPresentedText==value then return false end
+    f._bmPresentedText=value;f:SetText(value);return true
+end
+local function setWidth(f,width)
+    if f._bmPresentedWidth==width then return end
+    f._bmPresentedWidth=width;f:SetWidth(width)
+end
+local function setTexture(f,texture)
+    if f._bmPresentedTexture==texture then return end
+    f._bmPresentedTexture=texture;f:SetTexture(texture)
+end
+local function styleText(f,role)
+    role=role or "text"
+    -- StyleText's existing theme subscription handles palette/outline changes.
+    if not f._bmTextStyled or f._bmTextRole~=role or f._bmTextOnWorld then UI.StyleText(f,role) end
+end
 local function Paint()
     for _,fn in ipairs(painters) do fn() end
 end
@@ -31,8 +54,8 @@ local function paint(fn) painters[#painters+1]=fn;fn() end
 local function text(parent,value,size,role)
     local fs=parent:CreateFontString(nil,"OVERLAY","GameFontHighlight")
     UI.SetRuntimeFont(fs,STANDARD_TEXT_FONT or GameFontNormal:GetFont(),size or 13)
-    fs:SetJustifyH("LEFT");fs:SetWordWrap(false);fs:SetText(value)
-    UI.StyleText(fs,role or "text")
+    fs:SetJustifyH("LEFT");fs:SetWordWrap(false);setText(fs,value)
+    styleText(fs,role or "text")
     return fs
 end
 local function surface(parent,role,borderless)
@@ -45,7 +68,13 @@ local function surface(parent,role,borderless)
     return f
 end
 local function place(f,x,y,w,h)
-    f:ClearAllPoints();f:SetPoint("TOPLEFT",canvas,"TOPLEFT",x,-y);f:SetSize(w,h)
+    if f._bmLayoutX~=x or f._bmLayoutY~=y then
+        f._bmLayoutX=x;f._bmLayoutY=y
+        f:ClearAllPoints();f:SetPoint("TOPLEFT",canvas,"TOPLEFT",x,-y)
+    end
+    if f._bmLayoutW~=w or f._bmLayoutH~=h then
+        f._bmLayoutW=w;f._bmLayoutH=h;f:SetSize(w,h)
+    end
 end
 local function label(parent,value,size,x,y,w,role)
     local fs=text(parent,value,size,role);fs:SetPoint("TOPLEFT",x,-y);fs:SetWidth(w);return fs
@@ -63,8 +92,8 @@ end
 local function leave() if GameTooltip then GameTooltip:Hide() end end
 local function button(parent,value,width,fn)
     local b=CreateFrame("Button",nil,parent,"UIPanelButtonTemplate")
-    b:SetSize(width,26);b:SetText(value);UI.SkinTextButton(b)
-    UI.StyleText(b:GetFontString(),"text")
+    b:SetSize(width,26);setText(b,value);UI.SkinTextButton(b)
+    styleText(b:GetFontString(),"text")
     UI.RegisterRuntimeFont(b:GetFontString())
     b:SetScript("OnClick",fn);return b
 end
@@ -150,8 +179,8 @@ end
 local function sortedMaps()
     local list={}
     for i,map in ipairs(snapshot.maps) do list[i]=map end
+    local sort=DB().sortBy
     table.sort(list,function(a,b)
-        local sort=DB().sortBy
         if sort=="weekly" and a.weekly~=b.weekly then return a.weekly>b.weekly end
         if sort=="score" and a.score~=b.score then return a.score>b.score end
         if a.name~=b.name then return a.name<b.name end
@@ -196,30 +225,42 @@ local function makeTile(index)
     f.portal=b;tiles[index]=f
     return f
 end
-local function syncPortal(tile)
+local function syncPortal(tile,layoutChanged)
     local b=tile.portal
     if InCombatLockdown() then pending=true;return end
     local id,state
     if tile.map then id,state=D.Portal(tile.map.id) end
-    local usable=active and tile:IsShown() and DB().teleport and id and state==T["点击传送"]
+    local enabled=DB().teleport
+    local usable=not not (active and tile:IsShown() and enabled and id and state==T["点击传送"])
+    local scale,strata,level
+    if usable then
+        scale=tile:GetEffectiveScale()/UIParent:GetEffectiveScale()
+        strata=host:GetFrameStrata();level=host:GetFrameLevel()+30
+    end
+    if not layoutChanged and tile.portalCached and tile.portalID==id and tile.portalState==state
+        and tile.portalEnabled==enabled and tile.portalUsable==usable
+        and tile.portalScale==scale and tile.portalStrata==strata and tile.portalLevel==level then return end
+    tile.portalCached=true;tile.portalID=id;tile.portalState=state
+    tile.portalEnabled=enabled;tile.portalUsable=usable
+    tile.portalScale=scale;tile.portalStrata=strata;tile.portalLevel=level
     if GameTooltip and (GameTooltip:IsOwned(b) or GameTooltip:IsOwned(tile.portalStatus)) then leave() end
-    tile.state:SetText(usable and "" or (DB().teleport and (state==T["冷却状态暂不可用"] and T["状态未知"] or state or T["未收录传送"]) or T["传送已关闭"]))
+    setText(tile.state,usable and "" or (DB().teleport and (state==T["冷却状态暂不可用"] and T["状态未知"] or state or T["未收录传送"]) or T["传送已关闭"]))
     tile.portalStatus:SetShown(not usable)
     if not usable then
         if b.driver and UnregisterStateDriver then UnregisterStateDriver(b,"visibility");b.driver=nil end
         b:Hide();b:SetAttribute("type1",nil);b:SetAttribute("spell",nil);return
     end
-    local scale=tile:GetEffectiveScale()/UIParent:GetEffectiveScale()
     b:SetScale(scale);b:SetSize(84,20);b:ClearAllPoints();b:SetPoint("BOTTOMRIGHT",tile,"BOTTOMRIGHT",-8,4)
-    b:SetFrameStrata(host:GetFrameStrata());b:SetFrameLevel(host:GetFrameLevel()+30)
+    b:SetFrameStrata(strata);b:SetFrameLevel(level)
     b:SetAttribute("type1","spell");b:SetAttribute("spell",id)
-    b.caption:SetText(T["点击传送"])
+    setText(b.caption,T["点击传送"])
     if RegisterStateDriver and not b.driver then RegisterStateDriver(b,"visibility","[combat] hide; show");b.driver=true end
     b:Show()
 end
 HidePortals=function()
     if InCombatLockdown() then pending=true;return end
     for _,tile in ipairs(tiles) do
+        tile.portalCached=false
         local b=tile.portal
         if b.driver and UnregisterStateDriver then UnregisterStateDriver(b,"visibility");b.driver=nil end
         b:Hide();b:SetAttribute("type1",nil);b:SetAttribute("spell",nil)
@@ -249,15 +290,34 @@ end
 -- Fit complete level tokens, reserving room for an ellipsis while more remain.
 -- Measure the actual font, not byte lengths (names, colors and outlines vary).
 local function SummaryLevels(font,runs)
+    local path,size,flags=font:GetFont()
+    local width=font:GetWidth()
+    local cache=font._bmSummaryMeasure
+    if cache and cache.count==#runs and cache.width==width and cache.path==path
+        and cache.size==size and cache.flags==flags and cache.measure==font.GetUnboundedStringWidth then
+        local same=true
+        for i,token in ipairs(cache.checked) do
+            if Level(runs[i].level,runs[i].timed)~=token then same=false;break end
+        end
+        if same then setText(font,cache.text);return end
+    end
+    if not cache then cache={checked={}};font._bmSummaryMeasure=cache end
+    wipe(cache.checked)
     local prefix=#runs..T["次  "]
     local parts,shown={},0
     for i,run in ipairs(runs) do
         parts[i]=Level(run.level,run.timed)
-        font:SetText(prefix..table.concat(parts,"/")..(i<#runs and "/…" or ""))
-        if font:GetUnboundedStringWidth()>font:GetWidth() then parts[i]=nil;break end
+        -- Remember only the visible prefix plus the first token that did not fit.
+        -- Its changes can make room for another token; never retain run records.
+        cache.checked[i]=parts[i]
+        setText(font,prefix..table.concat(parts,"/")..(i<#runs and "/…" or ""))
+        if font:GetUnboundedStringWidth()>width then parts[i]=nil;break end
         shown=i
     end
-    font:SetText(prefix..table.concat(parts,"/")..(shown<#runs and (shown>0 and "/…" or "…") or ""))
+    cache.text=prefix..table.concat(parts,"/")..(shown<#runs and (shown>0 and "/…" or "…") or "")
+    cache.count=#runs;cache.width=width;cache.path=path;cache.size=size;cache.flags=flags
+    cache.measure=font.GetUnboundedStringWidth
+    setText(font,cache.text)
 end
 local function SummaryTooltip(owner,map,runs)
     local lines={}
@@ -284,25 +344,29 @@ local function RenderRows()
         f.item=item;f.summary=summary;f.runs=summary and entry and entry.runs or nil
         f:SetShown(item~=nil)
         if item then
-            f.left:SetText(summary and item.name or (Level(item.level,item.timed).."  "..item.name))
-            UI.StyleText(f.left,summary and "accent" or "text")
-            f.time:SetText(summary and "" or TimePair(item))
+            setText(f.left,summary and item.name or (Level(item.level,item.timed).."  "..item.name))
+            styleText(f.left,summary and "accent" or "text")
+            setText(f.time,summary and "" or TimePair(item))
             f.time:SetShown(not summary)
-            f.left:SetWidth(summary and 142 or 150)
-            f.right:ClearAllPoints();f.right:SetPoint("TOPLEFT",summary and 154 or 276,-6);f.right:SetWidth(summary and 150 or 28)
+            if f._bmSummaryLayout~=summary then
+                f._bmSummaryLayout=summary
+                setWidth(f.left,summary and 142 or 150)
+                f.right:ClearAllPoints();f.right:SetPoint("TOPLEFT",summary and 154 or 276,-6)
+                setWidth(f.right,summary and 150 or 28)
+            end
             if summary then
-                if not snapshot.historyReady then f.right:SetText(T["待同步"])
-                elseif #entry.runs==0 then f.right:SetText(T["未完成"])
+                if not snapshot.historyReady then setText(f.right,T["待同步"])
+                elseif #entry.runs==0 then setText(f.right,T["未完成"])
                 else SummaryLevels(f.right,entry.runs) end
-            else f.right:SetText(item.timed==nil and T["未知"] or Timed(item)) end
-            UI.StyleText(f.right,not summary and (item.timed==true and "accent" or item.timed==false and "danger") or "muted")
+            else setText(f.right,item.timed==nil and T["未知"] or Timed(item)) end
+            styleText(f.right,not summary and (item.timed==true and "accent" or item.timed==false and "danger") or "muted")
         end
     end
-    canvas.empty:SetText(summary and (#list==0 and T["等待游戏同步赛季地下城…"] or "")
+    setText(canvas.empty,summary and (#list==0 and T["等待游戏同步赛季地下城…"] or "")
         or (snapshot.historyReady and (#list==0 and T["本周还没有大秘境记录"] or "") or T["等待游戏同步本周记录…"]))
-    canvas.range:SetText(#list==0 and "" or string.format("%d–%d / %d",rowOffset+1,math.min(#list,rowOffset+visible),#list)..(#list>visible and T["  ·  滚轮查看更多"] or ""))
-    canvas.runTab.caption:SetText(T["本周记录  "]..#snapshot.runs)
-    canvas.mapTab.caption:SetText(T["副本汇总  "]..#snapshot.maps)
+    setText(canvas.range,#list==0 and "" or string.format("%d–%d / %d",rowOffset+1,math.min(#list,rowOffset+visible),#list)..(#list>visible and T["  ·  滚轮查看更多"] or ""))
+    setText(canvas.runTab.caption,T["本周记录  "]..#snapshot.runs)
+    setText(canvas.mapTab.caption,T["副本汇总  "]..#snapshot.maps)
     canvas.runTab:UpdateSelection();canvas.mapTab:UpdateSelection()
 end
 -- Compact teammate rows only. Keep full names in tooltips, dungeon cards and
@@ -314,18 +378,52 @@ local partyDungeonNames={
     [T["塞塔里斯神庙"]]=T["神庙"],
     [T["红玉新生法池"]]=T["红玉"],
 }
-local function RenderParty()
-    local members=ns.PartyKeystones and ns.PartyKeystones.Snapshot() or {}
+local function RenderParty(members)
     for i,f in ipairs(partyRows)do
         local entry=members[i];f.entry=entry;f:SetShown(entry~=nil)
         if GameTooltip and GameTooltip:IsOwned(f) then leave()end
         if entry then
-            f.owner:SetText(tint(entry.shortName,D.ClassColor(entry.class)))
-            f.level:SetText(entry.level and entry.level>0 and Level(entry.level) or "")
+            setText(f.owner,tint(entry.shortName,D.ClassColor(entry.class)))
+            setText(f.level,entry.level and entry.level>0 and Level(entry.level) or "")
             local name=entry.status or D.Map(entry.mapID).name
-            f.dungeon:SetText(partyDungeonNames[name] or name)
+            setText(f.dungeon,partyDungeonNames[name] or name)
         end
     end
+end
+-- Shared by full refreshes and small key/roster updates; no history or portal work.
+local function RenderHeader()
+    local leftWidth=DB().showWeekly and 456 or 796
+    local partyLeft=leftWidth+12-PARTY_ROW_WIDTH
+    local members=ns.PartyKeystones and ns.PartyKeystones.Snapshot() or {}
+    local hasParty=#members>0
+    setWidth(canvas.score,hasParty and partyLeft-22 or leftWidth-82)
+    local changed=setText(canvas.key,snapshot.keyName and (T["当前钥石  "]..Level(snapshot.keyLevel).."  "..snapshot.keyName) or T["当前未持有钥石"])
+    local keyWidth=hasParty and partyLeft-22 or leftWidth-4
+    local keyFont=STANDARD_TEXT_FONT or GameFontNormal:GetFont()
+    local key=canvas.key
+    local font,size,flags=key:GetFont()
+    if changed or key._bmFitWidth~=keyWidth or key._bmFitParty~=hasParty or key._bmFitBaseFont~=keyFont
+        or key._bmFitFont~=font or key._bmFitSize~=size or key._bmFitFlags~=flags
+        or key._bmFitMeasure~=key.GetStringWidth then
+        UI.SetRuntimeFont(key,keyFont,18);setWidth(key,0)
+        local naturalWidth=key:GetStringWidth()
+        if hasParty and naturalWidth>keyWidth then
+            UI.SetRuntimeFont(key,keyFont,math.max(14,math.floor(18*keyWidth/naturalWidth)))
+        end
+        setWidth(key,keyWidth)
+        key._bmFitWidth=keyWidth;key._bmFitParty=hasParty;key._bmFitBaseFont=keyFont
+        key._bmFitFont,key._bmFitSize,key._bmFitFlags=key:GetFont()
+        key._bmFitMeasure=key.GetStringWidth
+    end
+    RenderParty(members)
+end
+local function updateOwnKey()
+    local map=D.Number(D.Call(C_MythicPlus,"GetOwnedKeystoneChallengeMapID"))
+    local level=D.Number(D.Call(C_MythicPlus,"GetOwnedKeystoneLevel"))
+    if map==snapshot.keyMap and level==snapshot.keyLevel then return false end
+    snapshot.keyMap=map;snapshot.keyLevel=level
+    snapshot.keyName=map and (snapshot.byMap[map] or D.Map(map)).name or nil
+    return true
 end
 local function build()
     host=surface(ChallengesFrame,"bg",true);_G.BaimiaoMythicPanel=host;host:Hide();host:EnableMouse(true)
@@ -393,7 +491,7 @@ local function build()
         function b:UpdateSelection()
             self.selected=mode==value
             self:SetBackdropColor(unpack(UI.palette[self.selected and "hover" or (self.hovered and "card" or "bg")]))
-            UI.StyleText(self.caption,self.selected and "accent" or "muted")
+            styleText(self.caption,self.selected and "accent" or "muted")
             self.indicator:SetColorTexture(unpack(UI.palette.accent));self.indicator:SetShown(self.selected)
         end
         b:SetScript("OnEnter",function(self)self.hovered=true;self:UpdateSelection()end)
@@ -414,6 +512,7 @@ local function build()
         f.left=label(f,"",11,4,6,150)
         f.time=label(f,"",11,158,6,112,"muted");f.time:SetJustifyH("RIGHT")
         f.right=label(f,"",11,276,6,28,"muted");f.right:SetJustifyH("RIGHT")
+        f._bmSummaryLayout=false -- initial anchors above already use the run-list layout
         f:EnableMouseWheel(true);f:SetScript("OnMouseWheel",canvas.list:GetScript("OnMouseWheel"))
         f:SetScript("OnEnter",function(self)
             local item=self.item;if not item then return end
@@ -433,50 +532,39 @@ Render=function()
     -- Grow names leftward; keep the level/dungeon columns and right edge fixed.
     local partyLeft=leftWidth+12-PARTY_ROW_WIDTH
     for i,f in ipairs(partyRows)do place(f,partyLeft,36+(i-1)*12,PARTY_ROW_WIDTH,12)end
-    local hasParty=ns.PartyKeystones and #ns.PartyKeystones.Snapshot()>0
-    canvas.score:SetWidth(hasParty and partyLeft-22 or leftWidth-82)
-    canvas.key:SetText(snapshot.keyName and (T["当前钥石  "]..Level(snapshot.keyLevel).."  "..snapshot.keyName) or T["当前未持有钥石"])
-    local keyWidth=hasParty and partyLeft-22 or leftWidth-4
-    local keyFont=STANDARD_TEXT_FONT or GameFontNormal:GetFont()
-    UI.SetRuntimeFont(canvas.key,keyFont,18);canvas.key:SetWidth(0)
-    local naturalWidth=canvas.key:GetStringWidth()
-    if hasParty and naturalWidth>keyWidth then
-        UI.SetRuntimeFont(canvas.key,keyFont,math.max(14,math.floor(18*keyWidth/naturalWidth)))
-    end
-    canvas.key:SetWidth(keyWidth)
-    RenderParty()
-    canvas.score:SetText(T["赛季评分  "]..Score(snapshot.rating,"rating"))
+    RenderHeader()
+    setText(canvas.score,T["赛季评分  "]..Score(snapshot.rating,"rating"))
     for i,f in ipairs(affixes) do
         f.info=snapshot.affixes[i];f:SetShown(f.info~=nil)
-        if f.info then f.icon:SetTexture(f.info.texture) end
+        if f.info then setTexture(f.icon,f.info.texture) end
     end
     canvas.affixEmpty:SetShown(#snapshot.affixes==0)
     local list=sortedMaps();local pages=math.max(1,math.ceil(#list/8));page=math.max(1,math.min(page,pages))
     place(canvas.prev,leftWidth-44,116,24,20);place(canvas.next,leftWidth-12,116,24,20)
     canvas.prev:SetShown(pages>1);canvas.next:SetShown(pages>1)
-    canvas.mapsTitle:SetText(T["副本概览 · 赛季 / 本周"]..(pages>1 and ("  "..page.."/"..pages) or ""))
+    setText(canvas.mapsTitle,T["副本概览 · 赛季 / 本周"]..(pages>1 and ("  "..page.."/"..pages) or ""))
     local width=(leftWidth-8)/2
     for i,tile in ipairs(tiles) do
         local map=list[(page-1)*8+i];tile.map=map;tile:SetShown(map~=nil)
         if map then
             place(tile,12+((i-1)%2)*(width+8),TILE_TOP+math.floor((i-1)/2)*TILE_PITCH,width,TILE_HEIGHT)
-            tile.icon:SetTexture(map.texture or 134400);tile.name:SetText(map.name);tile.name:SetWidth(width-54)
+            setTexture(tile.icon,map.texture or 134400);setText(tile.name,map.name);setWidth(tile.name,width-54)
             local best=db.showBest and (not map.ratingReady and T["赛季 —"] or (map.best>0 and (T["赛季 "]..Level(map.best,map.bestTimed)) or T["赛季未完成"])) or ""
             local score=db.showScore and (T["评分 "]..(map.ratingReady and Score(map.score) or "—")) or ""
-            tile.stats:SetText(best..(best~="" and score~="" and " · " or "")..score);tile.stats:SetWidth(width-54)
-            tile.week:SetText(snapshot.historyReady and (T["本周 "]..map.count..T[" 次"]..(map.weekly>0 and (" · "..Level(map.weekly,map.weeklyRun and map.weeklyRun.timed)) or "")) or T["本周待同步"])
+            setText(tile.stats,best..(best~="" and score~="" and " · " or "")..score);setWidth(tile.stats,width-54)
+            setText(tile.week,snapshot.historyReady and (T["本周 "]..map.count..T[" 次"]..(map.weekly>0 and (" · "..Level(map.weekly,map.weeklyRun and map.weeklyRun.timed)) or "")) or T["本周待同步"])
         end
-        syncPortal(tile)
+        syncPortal(tile,true)
     end
     canvas.noMaps:SetShown(#list==0)
     local timed=0;for _,run in ipairs(snapshot.runs) do if run.timed then timed=timed+1 end end
-    canvas.weekStats:SetText(snapshot.historyReady and string.format(T["完成 %d 次  ·  限时 %d 次  ·  最高 %s"],#snapshot.runs,timed,snapshot.weeklyBest and Level(snapshot.weeklyBest.level,snapshot.weeklyBest.timed) or "—") or T["正在同步本周记录…"])
+    setText(canvas.weekStats,snapshot.historyReady and string.format(T["完成 %d 次  ·  限时 %d 次  ·  最高 %s"],#snapshot.runs,timed,snapshot.weeklyBest and Level(snapshot.weeklyBest.level,snapshot.weeklyBest.timed) or "—") or T["正在同步本周记录…"])
     for i,f in ipairs(vaults) do
         local a=snapshot.vault[i]
-        f.title:SetText(a and (a.threshold..T[" 次奖励"]) or (T["宝库槽位 "]..i))
-        f.value:SetText(a and (math.min(a.progress,a.threshold).." / "..a.threshold) or "—")
-        UI.StyleText(f.value,a and a.progress>=a.threshold and "accent" or "muted")
-        f.detail:SetText(a and (a.progress>=a.threshold and T["已解锁"] or T["尚未解锁"]) or T["等待游戏数据"])
+        setText(f.title,a and (a.threshold..T[" 次奖励"]) or (T["宝库槽位 "]..i))
+        setText(f.value,a and (math.min(a.progress,a.threshold).." / "..a.threshold) or "—")
+        styleText(f.value,a and a.progress>=a.threshold and "accent" or "muted")
+        setText(f.detail,a and (a.progress>=a.threshold and T["已解锁"] or T["尚未解锁"]) or T["等待游戏数据"])
     end
     RenderRows()
 end
@@ -529,10 +617,24 @@ Refresh=function()
     active=true;fit();host:Show()
     snapshot=D.Snapshot();Render();suppressKogo()
 end
-Queue=function()
-    if queued or (not Enabled() and not active and not pending) then return end
+Queue=function(scope)
+    if not Enabled() and not active and not pending then return end
+    if scope=="party" or scope=="key" then
+        if not active or not ChallengesFrame or not ChallengesFrame:IsVisible() then return end
+        if scope=="party" then queuedParty=true else queuedKey=true end
+    else queuedFull=true end
+    if queued then return end
     queued=true
-    C_Timer.After(0,function()queued=false;Refresh()end)
+    C_Timer.After(0,function()
+        local full,party,key=queuedFull,queuedParty,queuedKey
+        queued=false;queuedFull=false;queuedParty=false;queuedKey=false
+        -- Full data/layout changes win regardless of event order. Combat and hide
+        -- transitions retain the original restore/defer path for secure buttons.
+        if full or pending or not active or not snapshot or not Enabled() or InCombatLockdown()
+            or not ChallengesFrame or not ChallengesFrame:IsVisible() then Refresh();return end
+        local keyChanged=key and updateOwnKey()
+        if party or keyChanged then RenderHeader() end
+    end)
 end
 local function hookChallenges()
     if hooked or not ChallengesFrame then return end
@@ -593,7 +695,7 @@ SyncEvents=function()
 end
 local registered=false
 local function init()
-    if ns.PartyKeystones then ns.PartyKeystones.Start(Queue,Enabled)end
+    if ns.PartyKeystones then ns.PartyKeystones.Start(function()Queue("party")end,Enabled)end
     if not registered then
         registered=true
         SLASH_BMMYTHICPLUS1="/bmmp"
@@ -610,9 +712,10 @@ events:SetScript("OnEvent",function(_,event,name)
     elseif event=="PLAYER_REGEN_DISABLED" then
         if active and canvas then
             for _,tile in ipairs(tiles) do if tile.map then
+                tile.portalCached=false
                 if GameTooltip and (GameTooltip:IsOwned(tile.portal) or GameTooltip:IsOwned(tile.portalStatus)) then leave() end
                 local _,state=D.Portal(tile.map.id)
-                tile.state:SetText(DB().teleport and state or T["传送已关闭"]);tile.portalStatus:Show()
+                setText(tile.state,DB().teleport and state or T["传送已关闭"]);tile.portalStatus:Show()
             end end
         end
     elseif event=="PLAYER_REGEN_ENABLED" then
@@ -623,7 +726,7 @@ events:SetScript("OnEvent",function(_,event,name)
         if active and not InCombatLockdown() then for _,tile in ipairs(tiles) do syncPortal(tile) end end
     elseif Enabled() and ChallengesFrame and ChallengesFrame:IsVisible() then
         if event=="CHALLENGE_MODE_COMPLETED" then RequestData() end
-        Queue()
+        Queue(event=="BAG_UPDATE_DELAYED" and "key" or nil)
     end
 end)
 local function BuildOptions(panel,m,L)
@@ -661,3 +764,7 @@ ns.RegisterModule({id=ID,name=T["大秘境信息优化"],desc=T["副本成绩、
     defaults=defaults,BuildOptions=BuildOptions,OnEnable=init,
     OnDisable=function()if ns.PartyKeystones then ns.PartyKeystones.Stop()end;Refresh()end,
     OnToggle=function(_,on)if on then init()end;Refresh()end})
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("MythicPlus", events, "OnEvent") end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("MythicPlus.lua") end

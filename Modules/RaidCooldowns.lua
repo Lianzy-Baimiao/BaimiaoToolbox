@@ -80,11 +80,15 @@ local function IsSecret(value)
 end
 
 -- Cache only successful negative queries out of combat; never retain aura objects
--- or secret/unknown results. Player/world events invalidate immediately; a one
--- second fallback bounds recovery if an event is missed.
-local absentLustUntil, absentSatedUntil
+-- or secret/unknown results. This inner one-second memo is subordinate to the
+-- public snapshot's fallback; player/world events invalidate both.
+-- Readable outdoor ready state is event-led, with a 15 s missed-event safety
+-- net. Active/sated snapshots keep 2 s; restricted inference still uses 0.25 s.
+local LUST_READY_RECHECK_SECONDS = 15
+local SAMPLE_EPSILON = 0.000001 -- tolerate floating-point timer boundaries
+local absentLustUntil, absentSatedUntil, lustNextSample
 local function InvalidateAuraAbsence()
-    absentLustUntil, absentSatedUntil = nil, nil
+    absentLustUntil, absentSatedUntil, lustNextSample = nil, nil, nil
 end
 
 local function ReadAuras(ids, now, cacheAbsence)
@@ -185,6 +189,10 @@ local function IsUnrelatedAuraUpdate(info)
     return true
 end
 
+local function IsLustReady(state)
+    return not state.active and state.sated == 0 and not state.unknown
+end
+
 local function SampleLust()
     if worldLeaving then
         ClearLustState()
@@ -198,8 +206,14 @@ local function SampleLust()
         satedPrevious, guessUntil = nil, nil
         guessContext = context
     end
-    -- Keep dungeon/raid edge inference and combat polling uncached.
+    -- Public out-of-combat snapshots drive local countdowns. Events/expiry force
+    -- a fresh read; restricted dungeon/combat inference keeps its fast fallback.
     local cacheAbsence = not context and not InCombatLockdown()
+    local expired = (lustState.endsAt and lustState.endsAt <= now)
+        or (lustState.satedExp and lustState.satedExp <= now)
+    if cacheAbsence and not lustState.unknown and not expired
+        and lustNextSample and now + SAMPLE_EPSILON < lustNextSample then return lustState end
+    lustNextSample = now + 2
     local sated, satedExp, satedStart = ReadAuras(SATED_DEBUFFS, now, cacheAbsence)
     local freshSated = satedPrevious == 0 and sated == 1
     -- 首次采样只建立基线；未知采样也会打断“确认没有 -> 新出现”的证据链。
@@ -217,8 +231,10 @@ local function SampleLust()
     ClearLustState()
     local state = lustState
     state.sated, state.satedExp = sated, satedExp
+    state.unknown = sated == -1
     if not dead then
         local buff, buffExp = ReadAuras(LUST_SPELLS, now, cacheAbsence)
+        state.unknown = state.unknown or buff == -1 or (buff == 1 and not buffExp)
         if buff == 1 then
             state.active, state.endsAt, state.source = true, buffExp, T["嗜血增益"]
             -- 读得到实际结束时间时缩短备用窗口，不把推定计时延长到真实增益之后。
@@ -227,6 +243,9 @@ local function SampleLust()
             state.active, state.endsAt, state.source = true, guessUntil, T["新疲惫推定"]
             state.estimated = true
         end
+    end
+    if cacheAbsence and IsLustReady(state) then
+        lustNextSample = now + LUST_READY_RECHECK_SECONDS
     end
     if state.active and not wasActive then
         lastTriggerSource, lastTriggerAt = state.source, now
@@ -265,14 +284,44 @@ local BREZ_BY_CLASS = {
     PALADIN     = 391054,  -- 代祷（惩戒骑等自带战复）
 }
 
-local function GetOwnBrez()
-    local _, class = UnitClass("player")
-    return BREZ_BY_CLASS[class]
+-- Identity/learned status changes on spell/world events, not on every cooldown
+-- tick. Live public cooldown snapshots below have a separate bounded lifetime.
+local ownBrezClassReady, ownBrezSpell, ownBrezKnown
+local brezNextSample, brezLastSample, brezCharges, brezMax, brezStart, brezDuration, brezEndsAt
+local function InvalidateOwnBrez()
+    ownBrezClassReady, ownBrezSpell, ownBrezKnown = nil, nil, nil
+    brezNextSample = nil
 end
 
-local function IsKnown(spellID)
-    if not spellID then return false end
-    return (IsSpellKnown and IsSpellKnown(spellID)) or (IsPlayerSpell and IsPlayerSpell(spellID)) or false
+local function GetOwnBrez()
+    if not ownBrezClassReady then
+        local ok, _, class = pcall(UnitClass, "player")
+        if not ok or IsSecret(class) or type(class) ~= "string" or class == "" then return nil end
+        ownBrezSpell = BREZ_BY_CLASS[class]
+        ownBrezClassReady = true -- also remembers classes without a personal battle resurrection
+    end
+    return ownBrezSpell
+end
+
+local function ReadKnownFlag(query, spellID)
+    if not query then return false end -- this API is unavailable; the other can still answer
+    local ok, known = pcall(query, spellID)
+    if ok and not IsSecret(known) and type(known) == "boolean" then return known end
+    -- Unknown/error/secret is not a negative answer: retry on the existing ticker.
+end
+
+local function IsOwnBrezKnown(spellID)
+    if ownBrezKnown ~= nil then return ownBrezKnown end
+    if not (IsSpellKnown or IsPlayerSpell) then return nil end
+    local known = ReadKnownFlag(IsSpellKnown, spellID)
+    if known == true then
+        ownBrezKnown = true
+    else
+        local playerKnown = ReadKnownFlag(IsPlayerSpell, spellID)
+        if playerKnown == true then ownBrezKnown = true
+        elseif known == false and playerKnown == false then ownBrezKnown = false end
+    end
+    return ownBrezKnown
 end
 
 -- 读某法术的可用性：优先按“充能”，没有充能体系就退回“冷却”当 1 充能算。
@@ -280,25 +329,62 @@ end
 -- 自己会的单发战复成立；对不会的法术（武僧去读复生 20484）会读成「不在 CD = 1」，
 -- 于是没有战复的职业也显示「战复：1」。非 poolOnly 时同样会跳过自己没学的法术。
 -- 返回 charges, maxCharges, cdStart, cdDuration；读不到返回 nil。
+local function PublicNumber(value)
+    return not IsSecret(value) and type(value) == "number"
+        and value == value and value > -math.huge and value < math.huge
+end
+
+-- A public, specifically addressed spell cooldown need not invalidate a fresh,
+-- fully ready brez snapshot. Never apply this to a recharging/unknown snapshot:
+-- unrelated notifications can still be its recovery path while data settles.
+-- Global/charge, shared-category, item and restricted payloads stay fail-open.
+local brezEventSpells = {[BREZ_SPELL]=true}
+for _, spellID in pairs(BREZ_BY_CLASS) do brezEventSpells[spellID]=true end
+local function PublicSpellID(value)
+    return PublicNumber(value) and value > 0 and value % 1 == 0
+end
+local function HasCooldownScope(value)
+    return IsSecret(value) or (value ~= nil and (not PublicNumber(value) or value ~= 0))
+end
+local function IsUnrelatedReadyBrezCooldown(spellID, baseSpellID, category, startRecoveryCategory, itemID)
+    if not brezNextSample or GetTime() + SAMPLE_EPSILON >= brezNextSample
+        or not brezCharges or not brezMax or brezMax <= 0 or brezCharges < brezMax then return false end
+    if not PublicSpellID(spellID) or IsSecret(baseSpellID)
+        or (baseSpellID ~= nil and not PublicSpellID(baseSpellID)) then return false end
+    if HasCooldownScope(category) or HasCooldownScope(startRecoveryCategory)
+        or HasCooldownScope(itemID) then return false end
+    -- Any supported battle resurrection can affect the shared pool. Match the
+    -- base as well as the override without resolving metadata on hot events.
+    if brezEventSpells[spellID] or (baseSpellID and brezEventSpells[baseSpellID]) then return false end
+    return true
+end
+
 local function SpellAvail(spellID, poolOnly)
     if not (C_Spell and spellID) then return nil end
-    if not poolOnly and not IsKnown(spellID) then return nil end
-    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(spellID)
-    if ci and ci.maxCharges and ci.maxCharges > 0 then
-        return ci.currentCharges, ci.maxCharges, ci.cooldownStartTime, ci.cooldownDuration
+    if not poolOnly and not IsOwnBrezKnown(spellID) then return nil end
+    local ok, ci
+    if C_Spell.GetSpellCharges then ok, ci = pcall(C_Spell.GetSpellCharges, spellID) end
+    if ok and not IsSecret(ci) and type(ci) == "table"
+        and PublicNumber(ci.maxCharges) and ci.maxCharges > 0
+        and PublicNumber(ci.currentCharges) and ci.currentCharges >= 0 then
+        local start = PublicNumber(ci.cooldownStartTime) and ci.cooldownStartTime or nil
+        local duration = PublicNumber(ci.cooldownDuration) and ci.cooldownDuration or nil
+        return ci.currentCharges, ci.maxCharges, start, duration
     end
-    if poolOnly then return nil end
+    if poolOnly or (C_Spell.GetSpellCharges and (not ok or IsSecret(ci) or ci ~= nil)) then return nil end
     -- 单发战复（如惩戒骑代祷、术士灵魂石）没有充能，用冷却判断：不在 CD = 1，在 CD = 0。
-    local cd = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(spellID)
-    if cd then
-        local onCD = cd.duration and cd.duration > 1.5 and cd.startTime and cd.startTime > 0
+    local cd
+    if C_Spell.GetSpellCooldown then ok, cd = pcall(C_Spell.GetSpellCooldown, spellID) end
+    if ok and not IsSecret(cd) and type(cd) == "table"
+        and PublicNumber(cd.duration) and PublicNumber(cd.startTime) then
+        local onCD = cd.duration > 1.5 and cd.startTime > 0
         return onCD and 0 or 1, 1, cd.startTime, cd.duration
     end
     return nil
 end
 
--- 返回：文字, 颜色。团队 = 共享战复池；单人/小队 = 自己的战复法术（没有就读队伍共享池）。
-local function GetBrezState()
+-- 返回公开数值快照。团队 = 共享战复池；单人/小队 = 自己的战复法术（没有就读队伍共享池）。
+local function ReadBrezState()
     local charges, maxc, start, dur
 
     if IsInRaid() then
@@ -307,7 +393,7 @@ local function GetBrezState()
     else
         -- 单人/小队：先看自己职业的战复（惩戒骑=代祷，不在 CD 就是 1）。
         local own = GetOwnBrez()
-        if own and IsKnown(own) then
+        if own then
             charges, maxc, start, dur = SpellAvail(own)
         end
         -- 自己不会：小队副本里队友的战复走共享池；读不到充能就是「没有」，
@@ -317,6 +403,23 @@ local function GetBrezState()
         end
     end
 
+    return charges, maxc, start, dur
+end
+
+local function GetBrezState()
+    local now = GetTime()
+    if not brezNextSample or now + SAMPLE_EPSILON >= brezNextSample or (brezEndsAt and now >= brezEndsAt) then
+        brezLastSample = now
+        brezCharges, brezMax, brezStart, brezDuration = ReadBrezState()
+        -- Never retain API tables or secret fields, or infer a newly earned charge.
+        -- Events wake sooner; a missed event is recovered within two seconds.
+        brezNextSample, brezEndsAt = now + 2, nil
+        if brezCharges and brezMax and brezCharges < brezMax and brezStart and brezDuration then
+            local endsAt = brezStart + brezDuration
+            if endsAt > now then brezEndsAt = endsAt end
+        end
+    end
+    local charges, maxc, start, dur = brezCharges, brezMax, brezStart, brezDuration
     if not charges then
         -- 组着队却读不到共享池（例如野外小队）：显示「?」而不是「无」，
         -- 避免把"读不到"说成"没有战复"（模块里其它读不到的值也用「--/?」这种写法）。
@@ -571,29 +674,57 @@ end
 --------------------------------------------------------------------------------
 
 local frame
-local pollActive = false      -- 0.25s 轮询开关；模块关闭时停掉避免空转
+local pollActive = false      -- event subscription lifetime, not timer lifetime
+local lustDemand, brezDemand, pollInterval, quietPoll
+local cooldownWakePending, cooldownWakeGeneration = false, 0
 local pollFrame
 ns.IdleTasks = ns.IdleTasks or {}
 local pollTask = {}
 ns.IdleTasks.RaidCD = pollTask
 local function PollTick()
-    if pollActive then pollTask.run() end
+    if not pollActive then return end
+    -- Coalesce deadlines within 1 s onto an existing quiet wake. Ready lust
+    -- keeps its own 15 s deadline (14-15 s when sharing the 2 s brez timer),
+    -- rather than scanning every 2 s or creating an extra timer/charge query.
+    -- Events never move a reused snapshot's deadline later.
+    if quietPoll then
+        local alignBefore = GetTime() + 1 + SAMPLE_EPSILON
+        if lustDemand and (not lustNextSample or lustNextSample <= alignBefore) then
+            InvalidateAuraAbsence()
+        end
+        if brezDemand and (not brezNextSample or brezNextSample <= alignBefore) then
+            brezNextSample = nil
+        end
+    end
+    pollTask.run()
+end
+local function SetPollInterval(interval)
+    if pollInterval == interval
+        or (pollInterval and interval and math.abs(pollInterval - interval) < SAMPLE_EPSILON) then return end
+    if pollTask.timer then pollTask.timer:Cancel(); pollTask.timer = nil end
+    pollInterval = interval
+    if interval then pollTask.timer = C_Timer.NewTicker(interval, function() return PollTick() end) end
 end
 local function SetPolling(active)
     if active and not pollActive then worldLeaving = false end
+    if not active or not pollActive then InvalidateOwnBrez() end
     pollActive = active and true or false
     if not pollFrame then return end
     pollFrame:SetShown(pollActive)
     if pollActive then
         for _, event in ipairs({"PLAYER_ENTERING_WORLD", "PLAYER_LEAVING_WORLD",
-            "ZONE_CHANGED_NEW_AREA", "PLAYER_DEAD", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED"}) do
+            "ZONE_CHANGED_NEW_AREA", "PLAYER_DEAD", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+            "SPELLS_CHANGED", "PLAYER_SPECIALIZATION_CHANGED", "GROUP_ROSTER_UPDATE",
+            "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES", "PLAYER_ALIVE", "PLAYER_UNGHOST"}) do
             pollFrame:RegisterEvent(event)
         end
-        if not pollTask.timer then pollTask.timer = C_Timer.NewTicker(0.25, PollTick) end
         if pollFrame.RegisterUnitEvent then pollFrame:RegisterUnitEvent("UNIT_AURA", "player")
         else pollFrame:RegisterEvent("UNIT_AURA") end
     else
-        if pollTask.timer then pollTask.timer:Cancel(); pollTask.timer = nil end
+        SetPollInterval(nil)
+        cooldownWakeGeneration = cooldownWakeGeneration + 1
+        cooldownWakePending = false
+        lustDemand, brezDemand = nil, nil
         pollFrame:UnregisterAllEvents()
     end
 end
@@ -621,9 +752,14 @@ local function ApplyLook()
     frame.rows[2]:SetHeight(size + 2)
 end
 
-local function UpdateRow(row, text, color)
+local function UpdateRow(row, text, color, skipUnchanged)
+    -- An event for the other row need not read native text/font state again.
+    -- Cache only our public display values; changed content always wins. Full
+    -- timer/settings passes still recover external text and font changes.
+    if skipUnchanged and row.displayText == text and row.displayColor == color then return false end
     local changed = row.text:GetText() ~= text
     if changed then row.text:SetText(text) end
+    row.displayText = text
     if row.displayColor ~= color then
         row.text:SetTextColor(color[1], color[2], color[3])
         row.displayColor = color
@@ -637,49 +773,104 @@ local function UpdateRow(row, text, color)
     return changed
 end
 
-local function UpdateDisplay()
+-- Use local shown state, not effective visibility (UIParent may be hidden).
+-- Reading the frame also recovers correctly if something else changed it.
+local function SetShownIfChanged(widget, shown)
+    shown = not not shown
+    if widget:IsShown() ~= shown then widget:SetShown(shown) end
+end
+
+local function UpdateDisplay(changedRow)
     if not frame then return end
     local d = DB()
 
     if not ns.IsModuleEnabled(MODULE_ID) or not d.enabled then
         ResetLustSession()
-        frame:Hide()
+        SetPollInterval(nil)
+        SetShownIfChanged(frame, false)
         return
     end
-
-    local state = SampleLust()
-    SyncLustMusic()
 
     -- 按当前处于 单人/小队/团队 的可见性设置决定显示；解锁时强制可见便于摆位。
     local show
     if IsInRaid() then show = d.showRaid
     elseif IsInGroup() then show = d.showParty
     else show = d.showSolo end
-    if not show and frame:IsLocked() then
-        frame:Hide()
-        return
-    end
+    local visible = show or not frame:IsLocked()
     local showLust = d.showLust ~= false
-    frame:SetShown(showLust or d.showBrez)
-    frame.rows[1]:SetShown(showLust)
-
-    -- 第一行：嗜血
-    local lustTxt, lustCol = GetLustDisplay(state)
-    local changed = UpdateRow(frame.rows[1], lustTxt, lustCol)
-    -- 第二行：战复
-    if d.showBrez then
-        frame.rows[2]:Show()
-        local brezTxt, brezCol = GetBrezState()
-        if UpdateRow(frame.rows[2], brezTxt, brezCol) then changed = true end
-    else
-        frame.rows[2]:Hide()
-    end
-
-    -- Keep polling aura/music state, but only lay out changed display content.
+    local wantsLust = (visible and showLust) or d.music.enabled
+    local wantsBrez = visible and d.showBrez
+    local lustDemandChanged = (not not wantsLust) ~= (not not lustDemand)
+    local brezDemandChanged = (not not wantsBrez) ~= (not not brezDemand)
+    if lustDemandChanged then ResetLustSession() end
+    if brezDemandChanged then brezNextSample = nil end
+    lustDemand, brezDemand = wantsLust, wantsBrez
     local size = d.fontSize or 16
     if layoutLust ~= showLust or layoutBrez ~= d.showBrez or layoutSize ~= size then
         layoutDirty = true
     end
+
+    local restrictedLust = wantsLust and (InCombatLockdown() or GuessContext())
+    -- Partial events may reuse only fresh, public ready snapshots. Due samples,
+    -- countdowns, unknown/restricted states and demand/layout changes still take
+    -- the full path. Reuse never extends either deadline or adds a timer.
+    local partialReady = changedRow and not layoutDirty and not worldLeaving
+        and not restrictedLust and not lustDemandChanged and not brezDemandChanged
+    local state = lustState
+    local skipLust = partialReady and changedRow == "brez" and wantsLust
+        and not guessContext and IsLustReady(state) and not musicWantedLast
+        and lustNextSample and GetTime() + SAMPLE_EPSILON < lustNextSample
+        and (not visible or not showLust or (frame.rows[1].displayText
+            and frame.rows[1].displayColor == READY_COLOR))
+    if wantsLust and not skipLust then state = SampleLust() end
+    if not skipLust then SyncLustMusic() end
+    local skipBrez = partialReady and changedRow == "lust" and wantsBrez
+        and brezCharges and brezMax and brezCharges >= brezMax and not brezEndsAt
+        and brezNextSample and GetTime() + SAMPLE_EPSILON < brezNextSample
+        and frame.rows[2].displayText and frame.rows[2].displayColor == READY_COLOR
+    local brezText, brezColor
+    if wantsBrez and not skipBrez then brezText, brezColor = GetBrezState() end
+    local interval
+    quietPoll = false
+    if wantsLust or wantsBrez then
+        interval = (wantsBrez or (wantsLust and not IsLustReady(state)))
+            and 2 or LUST_READY_RECHECK_SECONDS
+        if (wantsLust and (state.endsAt or state.satedExp)) or (wantsBrez and brezEndsAt) then interval = 1 end
+        if wantsLust and (restrictedLust or state.unknown) then interval = 0.25 end
+        quietPoll = interval == 2
+        -- Events can refresh between render ticks. Wake by the actual sample
+        -- deadline instead of letting a one-second render phase stretch the cache.
+        local now = GetTime()
+        if wantsLust and lustNextSample and lustNextSample > now + SAMPLE_EPSILON then
+            interval = math.min(interval, lustNextSample - now)
+        end
+        if wantsBrez and brezNextSample and brezNextSample > now + SAMPLE_EPSILON then
+            interval = math.min(interval, brezNextSample - now)
+        end
+    end
+    SetPollInterval(interval)
+    if not visible then
+        SetShownIfChanged(frame, false)
+        return
+    end
+    SetShownIfChanged(frame, showLust or d.showBrez)
+    SetShownIfChanged(frame.rows[1], showLust)
+    SetShownIfChanged(frame.rows[2], d.showBrez)
+
+    -- Hidden rows do no display work. Hidden music still owns aura tracking;
+    -- with neither display nor music demand the timer is completely stopped.
+    local changed = false
+    if showLust and not skipLust then
+        local lustTxt, lustCol = GetLustDisplay(state)
+        changed = UpdateRow(frame.rows[1], lustTxt, lustCol, changedRow == "brez" and not layoutDirty)
+    end
+    -- 第二行：战复
+    if d.showBrez and not skipBrez then
+        if UpdateRow(frame.rows[2], brezText, brezColor, changedRow == "lust" and not layoutDirty) then changed = true end
+    end
+
+    -- Full timer/settings passes still validate both rows' native text/font state.
+    -- Partial events need no display getters for a reused ready row.
     if not changed and not layoutDirty then return end
     if layoutDirty then
         frame.rows[2]:ClearAllPoints()
@@ -745,16 +936,43 @@ local function CreateFrameOnce()
     frame.rows[2]:SetPoint("TOPLEFT", frame.rows[1], "BOTTOMLEFT", 0, -2)
     frame.rows[2]:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
 
-    -- 0.25s 刷新，倒计时够顺滑又不费。模块关闭时由 OnDisable 停掉。
-    -- 音乐独立轮询，不依附可见监控框。玩家光环事件用于及时捕获疲惫的移除/新获得。
+    -- Event-driven ready lust with a 15s safety net; brez quiet fallback 2s,
+    -- countdown display 1s, restricted aura inference 0.25s. Hidden music
+    -- does not depend on UI visibility.
     local poll = CreateFrame("Frame", "BaimiaoRaidCDPoll", UIParent)
     pollFrame = poll
     SetPolling(ns.IsModuleEnabled(MODULE_ID) and DB().enabled)
-    poll:SetScript("OnEvent", function(_, event, unit, updateInfo)
+    poll:SetScript("OnEvent", function(_, event, unit, updateInfo, category, startRecoveryCategory, itemID)
         -- 启用状态下跟踪世界切换；停用后的重新启用由 SetPolling 重置。
         if event == "PLAYER_ENTERING_WORLD" then worldLeaving = false end
         if not pollActive or (event == "UNIT_AURA" and unit ~= "player") then return end
+        if event == "PLAYER_SPECIALIZATION_CHANGED" and unit ~= "player" then return end
+        if event == "SPELL_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_CHARGES" then
+            if not brezDemand or cooldownWakePending then return end
+            if event == "SPELL_UPDATE_COOLDOWN"
+                and IsUnrelatedReadyBrezCooldown(unit, updateInfo, category, startRecoveryCategory, itemID) then return end
+            -- Cooldown events may arrive in bursts. One bounded wake, no heartbeat.
+            cooldownWakePending = true
+            local generation, lastSample = cooldownWakeGeneration, brezLastSample
+            local delay = math.max(0.1, 0.25 - (GetTime() - (lastSample or 0)))
+            C_Timer.After(delay, function()
+                if generation ~= cooldownWakeGeneration then return end
+                cooldownWakePending = false
+                if not pollActive or not brezDemand or brezLastSample ~= lastSample then return end
+                brezNextSample = nil
+                pollTask.run("brez")
+            end)
+            return
+        end
+        if event == "SPELLS_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+            InvalidateOwnBrez()
+            UpdateDisplay("brez")
+            return
+        end
+        if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_LEAVING_WORLD"
+            or event == "GROUP_ROSTER_UPDATE" then InvalidateOwnBrez() end
         if event == "UNIT_AURA" then
+            if not lustDemand then return end
             -- Any restricted field or failed lookup falls back, never suppresses.
             local ok, unrelated = pcall(IsUnrelatedAuraUpdate, updateInfo)
             if ok and unrelated then return end
@@ -769,8 +987,9 @@ local function CreateFrameOnce()
         elseif event == "PLAYER_DEAD" then
             ResetLustSession()
         end
-        UpdateDisplay()
+        UpdateDisplay(event == "UNIT_AURA" and "lust" or nil)
     end)
+    if ns.PerfWatchFrame then ns.PerfWatchFrame("RaidCD", poll, "OnEvent") end
 
     ApplyLook()
     frame:ApplyLockVisual()
@@ -782,6 +1001,8 @@ local function Refresh()
     frame:ApplyPosition()
     ApplyLook()
     frame:ApplyLockVisual()
+    InvalidateAuraAbsence()
+    brezNextSample = nil
     UpdateDisplay()
 end
 
@@ -829,6 +1050,7 @@ local function BuildOptions(panel,m,L)
         {name=T["嗜血音乐"],width=150,build=function(panel,L,onResize)
             L:Check(T["嗜血触发时播放音乐"],function()return DB().music.enabled end,function(v)
                 DB().music.enabled=v;if not v then StopLustMusic()end
+                Refresh()
             end,function()L:SyncAll()end)
             local function musicEnabled()return DB().music.enabled end
             local selected = 1
@@ -965,6 +1187,7 @@ ns.RegisterModule({
         CreateFrameOnce()
         SetupSlash()
         ResetLustSession()
+        SetPolling(DB().enabled)
         UpdateDisplay()
     end,
     OnDisable = function()
@@ -981,3 +1204,21 @@ ns.RegisterModule({
     end,
     BuildOptions = BuildOptions,
 })
+
+if ns.StartupWatchSlot then ns.StartupWatchSlot("RaidCD/Refresh", pollTask, "run") end
+
+-- Manual current-run attribution: no wrapping or timing while diagnostics are off.
+if ns.PerfWatchFunction then
+    ns.PerfWatchFunction("RaidCD/DB", function() return DB end, function(fn) DB=fn end)
+    ns.PerfWatchFunction("RaidCD/SampleLust", function() return SampleLust end, function(fn) SampleLust=fn end)
+    ns.PerfWatchFunction("RaidCD/ReadAuras", function() return ReadAuras end, function(fn) ReadAuras=fn end)
+    ns.PerfWatchFunction("RaidCD/GetBrezState", function() return GetBrezState end, function(fn) GetBrezState=fn end)
+    ns.PerfWatchFunction("RaidCD/ReadBrezState", function() return ReadBrezState end, function(fn) ReadBrezState=fn end)
+    ns.PerfWatchFunction("RaidCD/SpellAvail", function() return SpellAvail end, function(fn) SpellAvail=fn end)
+    ns.PerfWatchFunction("RaidCD/SyncLustMusic", function() return SyncLustMusic end, function(fn) SyncLustMusic=fn end)
+    ns.PerfWatchFunction("RaidCD/UpdateRow", function() return UpdateRow end, function(fn) UpdateRow=fn end)
+    ns.PerfWatchFunction("RaidCD/SetPollInterval", function() return SetPollInterval end, function(fn) SetPollInterval=fn end)
+    ns.PerfWatchFunction("RaidCD/Timer", function() return PollTick end, function(fn) PollTick=fn end)
+end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("RaidCooldowns.lua") end

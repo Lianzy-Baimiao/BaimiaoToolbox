@@ -122,6 +122,22 @@ end
 
 ns.UI = {}
 
+-- Account-wide, explicit opt-in. Never enable diagnostics just because an old
+-- profile has no preference, and never start a partial boot capture mid-session.
+function ns.IsStartupDiagnosticsEnabled()
+    return ns.GetDB("_diagnostics", {startup=false}).startup == true
+end
+function ns.SetStartupDiagnosticsEnabled(enabled)
+    ns.GetDB("_diagnostics", {startup=false}).startup = enabled and true or false
+    if not enabled and ns.StopStartupCapture then ns.StopStartupCapture(true) end
+end
+function ns.UI.BuildDiagnosticsOptions(layout)
+    layout:Section(T["性能诊断"])
+    layout:Check(T["启动时采集性能诊断（默认关闭）"],
+        ns.IsStartupDiagnosticsEnabled, ns.SetStartupDiagnosticsEnabled)
+    layout:Text(T["仅排查性能时开启。开启后重载界面生效；关闭立即停止采集。完成后自动输出结果并停止，不影响手动 /bmperf 诊断。"], true)
+end
+
 -- Account-wide appearance, separate from feature switches and character layout.
 -- Read the legacy coordinate preference once; explicit false must survive.
 function ns.UI.GetAppearanceDB()
@@ -1218,6 +1234,7 @@ local function BuildAbout(L)
     L:Check(T["在小地图边缘显示“白描工具箱”按钮（左键设置 / 右键列模块）"],
         function() return ns.IsMinimapButtonShown() end,
         function(v) ns.SetMinimapButtonShown(v) end)
+    ns.UI.BuildDiagnosticsOptions(L)
     L:Finalize()
 end
 
@@ -1415,8 +1432,10 @@ end
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:SetScript("OnEvent", function()
+    local loginStamp = ns.StartupBegin and ns.StartupBegin()
     -- 单模块报错不连坐：每个 OnEnable 独立 pcall，失败的打印出来继续。
     for _, m in ipairs(ns.orderedModules) do
+        local moduleStamp = ns.StartupBegin and ns.StartupBegin()
         local ok, err = pcall(function()
             m.db = ns.GetDB(m.id, m.defaults)
             if m.OnEnable then m.OnEnable(m) end
@@ -1424,13 +1443,21 @@ ev:SetScript("OnEvent", function()
         -- OnEnable also builds one-time UI/commands. Preserve that contract, then
         -- apply the saved off state through the same cleanup path as the switch.
         if not ns.IsModuleEnabled(m.id) then ns.SetModuleEnabled(m.id, false) end
+        if ns.StartupEnd then ns.StartupEnd("Module/" .. m.id, moduleStamp, ok) end
         if not ok then
             P((T["|cffff4040模块 %s 初始化失败：|r%s"]):format(tostring(m.id), tostring(err)))
         end
     end
+    local settingsStamp = ns.StartupBegin and ns.StartupBegin()
     local ok, err = pcall(BuildSettings)
+    if ns.StartupEnd then ns.StartupEnd("BuildSettings", settingsStamp, ok) end
     if not ok then P(T["|cffff4040设置界面构建失败：|r"] .. tostring(err)) end
-    pcall(CreateMinimapButton)
+    local minimapStamp = ns.StartupBegin and ns.StartupBegin()
+    local minimapOK = pcall(CreateMinimapButton)
+    if ns.StartupEnd then
+        ns.StartupEnd("CreateMinimapButton", minimapStamp, minimapOK)
+        ns.StartupEnd("PLAYER_LOGIN", loginStamp, true)
+    end
 end)
 
 --------------------------------------------------------------------------------
@@ -1466,3 +1493,7 @@ SlashCmdList["BAIMIAO"] = function(msg)
     end
     P(T["用法：/bm 打开设置，/bm <模块id> 直达该模块设置，/bm minimap 切换小地图按钮。"])
 end
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("Core", ev, "OnEvent") end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("Locales + Core.lua") end

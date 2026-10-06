@@ -9,6 +9,7 @@ local WHITE="Interface\\Buttons\\WHITE8x8"
 local defaults={enabled=true,groupOnly=true,leaderOnly=false,locked=true,scalePercent=100,
     showTargets=true,showWorlds=true,showManagement=true}
 local bar,running,pending=nil,false,false
+local laidOutTargets,laidOutWorlds,laidOutManagement
 local events=CreateFrame("Frame")
 local function DB()
     local d=ns.GetDB("smalltools")
@@ -167,17 +168,29 @@ end
 function M.Refresh()
     if InCombatLockdown() then pending=true;return end
     pending=false
-    if enabled() and not bar then build()end
-    if not bar then return end
-    local hasRows=layoutRows()
     local d=DB()
+    local hasRows=d.showTargets or d.showWorlds or d.showManagement
     local show=enabled() and hasRows and (not d.groupOnly or grouped())
         and (not d.leaderOnly or (grouped() and call(UnitIsGroupLeader,"player")==true))
-    if not show then
+    -- A hidden group/leader-only bar has no work to do at login. Build once
+    -- when it can actually be shown; combat requests are rechecked on regen.
+    if not bar then
+        if not show then return end
+        build()
+    end
+    -- Roster/leader events affect eligibility, not row geometry. Keep rows
+    -- synchronized with settings without repositioning every secure button.
+    if laidOutTargets~=d.showTargets or laidOutWorlds~=d.showWorlds
+        or laidOutManagement~=d.showManagement then
+        layoutRows()
+        laidOutTargets,laidOutWorlds,laidOutManagement=d.showTargets,d.showWorlds,d.showManagement
+    end
+    if not show and bar:IsShown() then
         for _,f in ipairs({bar:GetChildren()})do if GameTooltip:IsOwned(f) then GameTooltip:Hide();break end end
     end
-    bar:SetScale(math.max(70,math.min(140,tonumber(DB().scalePercent) or 100))/100)
-    bar:SetShown(show)
+    local scale=math.max(70,math.min(140,tonumber(d.scalePercent) or 100))/100
+    if bar:GetScale()~=scale then bar:SetScale(scale)end
+    if bar:IsShown()~=show then bar:SetShown(show)end
 end
 function M.Start()
     running=true
@@ -226,3 +239,5 @@ events:SetScript("OnEvent",function(_,event)
     M.Refresh()
     if not running and not pending then events:UnregisterAllEvents()end
 end)
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("MarkerAssist", events, "OnEvent") end

@@ -247,3 +247,5 @@ function D.Snapshot()
     if result.keyMap then result.keyName=(result.byMap[result.keyMap] or D.Map(result.keyMap)).name end
     return result
 end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("MythicPlusData.lua") end

@@ -26,14 +26,21 @@ local function statText(token)
     token=T[token]
     return colors and ("|cff"..colors[UI.palette.bg[1]>.5 and 2 or 1]..token.."|r") or token
 end
+-- Attributes() exposes only the finite built-in attribute vocabulary, not
+-- arbitrary queries. Retain one theme's formatted strings, not per-item copies.
+local attributeTextCache,attributeTheme={},UI.palette.bg[1]>.5
 function A.AttributeText(entry)
     local value=A.Attributes(entry);if not value then return nil end
+    local theme=UI.palette.bg[1]>.5
+    if attributeTheme~=theme then attributeTheme=theme;attributeTextCache={}end
+    local text=attributeTextCache[value];if text then return text end
     local parts={}
     -- Split whole UTF-8 tokens, not a byte character class containing '·'.
     for part in (value.."·"):gmatch("(.-)·")do
         parts[#parts+1]=(part:gsub("[^/]+",statText))
     end
-    return table.concat(parts,"·")
+    text=table.concat(parts,"·");attributeTextCache[value]=text
+    return text
 end
 local function card(parent,w,h)
     local f=CreateFrame("Frame",nil,parent,"BackdropTemplate")
@@ -55,22 +62,37 @@ local function box(parent,w,value,save)
     f:SetScript("OnEditFocusLost",function(self)self.commit()end)
     f.saved=value or "";f._bmAuctionInput=true;return f
 end
+-- These runtime labels have a single writer; cache the last value instead of
+-- crossing into native SetText again on unchanged prices/status/item data.
+local function setText(f,value)
+    if f._bmAuctionText~=value then f:SetText(value);f._bmAuctionText=value end
+end
 local function setBox(f,value)
     if GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()==f then return end
-    f.saved=tostring(value or "");f:SetText(f.saved)
+    f.saved=tostring(value or "")
+    -- Edit boxes have a user writer too; compare actual text, not a label cache.
+    if f:GetText()~=f.saved then f:SetText(f.saved)end
 end
+-- Rows are pooled: keep one pair of handlers and replace both payload fields
+-- on every bind so pagination/reordering cannot retain the previous item.
+local function showTooltip(self)
+    GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+    if self._bmTooltipItemID then GameTooltip:SetHyperlink("item:"..self._bmTooltipItemID)
+    else GameTooltip:AddLine(self._bmTooltipText or "",nil,nil,nil,true)end
+    GameTooltip:Show()
+end
+local function hideTooltip()GameTooltip:Hide()end
 local function tooltip(owner,id,text)
-    owner:SetScript("OnEnter",function(self)
-        GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
-        if id then GameTooltip:SetHyperlink("item:"..id) else GameTooltip:AddLine(text or "", nil, nil, nil, true) end
-        GameTooltip:Show()
-    end)
-    owner:SetScript("OnLeave",function()GameTooltip:Hide()end)
+    owner._bmTooltipItemID=id;owner._bmTooltipText=text
+    if owner._bmTooltipBound then return end
+    owner._bmTooltipBound=true
+    owner:SetScript("OnEnter",showTooltip);owner:SetScript("OnLeave",hideTooltip)
 end
 local function notify(message)
     if message then ns.Print(message) end
 end
-local function changed()
+local function changed(searchChanged)
+    if searchChanged then A.InvalidateSearchDirectory()end
     A.Stop(T["配置已修改，请重新开始"])
     if A.RefreshUI then A.RefreshUI()end
 end
@@ -94,7 +116,7 @@ local function addFavorite(value,group)
         if (id and v.itemID==id) or (query and v.query==query)then return notify(T["这个快捷搜索已经存在。"])end
     end
     d.favorites[#d.favorites+1]={itemID=id,query=query,group=A.Clean(group,36)~="" and A.Clean(group,36) or "常用"}
-    changed()
+    changed(true)
 end
 local function addItem(value)
     local items=A.Plan().items;local id=A.ItemID(value)
@@ -166,14 +188,15 @@ local function rowEditor(parent,kind,onResize)
         local items=isPlan and A.Plan().items or A.DB().favorites
         if isPlan then setBox(self.planName,A.Plan().name)
         else
-            self.title:SetText(T["我的收藏 · "]..#items..T[" 项"])
-            self.presets.title:SetText(T["内置预设 · "]..#A.catalog..T[" 项"])
+            setText(self.title,T["我的收藏 · "]..#items..T[" 项"])
+            setText(self.presets.title,T["内置预设 · "]..#A.catalog..T[" 项"])
         end
         self.empty:SetShown(#items==0)
         for i,entry in ipairs(items)do
             local row=self.rows[i]
             if not row then
                 row=card(self,680,42);self.rows[i]=row
+                row:SetPoint("TOPLEFT",0,self.rowsY-(i-1)*48)
                 if isPlan then
                     row.toggle=button(row,"",34,26,function()
                         if editingAllowed()then row.entry.enabled=not row.entry.enabled;changed()end
@@ -195,35 +218,39 @@ local function rowEditor(parent,kind,onResize)
                     end);row.price:SetPoint("TOPLEFT",388,-7)
                 else
                     row.group=box(row,184,"",function(value)
-                        if editingAllowed()then row.entry.group=A.Clean(value,36);changed()end
+                        if editingAllowed()then row.entry.group=A.Clean(value,36);changed(true)end
                     end);row.group:SetPoint("TOPLEFT",314,-7)
                 end
                 row.up=button(row,"↑",28,26,function()
                     if not editingAllowed()then return end
                     local list=isPlan and A.Plan().items or A.DB().favorites;local n=row.index
-                    if n>1 then list[n],list[n-1]=list[n-1],list[n];changed()end
+                    if n>1 then list[n],list[n-1]=list[n-1],list[n];changed(not isPlan)end
                 end);row.up:SetPoint("TOPLEFT",518,-8)
                 row.down=button(row,"↓",28,26,function()
                     if not editingAllowed()then return end
                     local list=isPlan and A.Plan().items or A.DB().favorites;local n=row.index
-                    if n<#list then list[n],list[n+1]=list[n+1],list[n];changed()end
+                    if n<#list then list[n],list[n+1]=list[n+1],list[n];changed(not isPlan)end
                 end);row.down:SetPoint("TOPLEFT",552,-8)
                 row.delete=button(row,T["移除"],58,26,function()
                     if not editingAllowed()then return end
-                    table.remove(isPlan and A.Plan().items or A.DB().favorites,row.index);changed()
+                    table.remove(isPlan and A.Plan().items or A.DB().favorites,row.index);changed(not isPlan)
                 end);row.delete:SetPoint("TOPLEFT",594,-8)
             end
-            row.entry=entry;row.index=i;row:SetPoint("TOPLEFT",0,self.rowsY-(i-1)*48);row:Show()
-            row.name:SetText(itemName(entry));row.id:SetText(entry.itemID and "#"..entry.itemID or T["关键词搜索"])
+            row.entry=entry;row.index=i;row:Show()
+            setText(row.name,itemName(entry));setText(row.id,entry.itemID and "#"..entry.itemID or T["关键词搜索"])
             row.icon:SetTexture(A.ItemIcon and A.ItemIcon(entry.itemID) or 134400)
-            if isPlan then row.toggle:SetText(entry.enabled and T["开"] or T["关"]);setBox(row.target,entry.target);setBox(row.price,(entry.maxPrice or 0)>0 and entry.maxPrice/10000 or "")
+            if isPlan then setText(row.toggle,entry.enabled and T["开"] or T["关"]);setBox(row.target,entry.target);setBox(row.price,(entry.maxPrice or 0)>0 and entry.maxPrice/10000 or "")
             else setBox(row.group,entry.group)end
             tooltip(row,entry.itemID,entry.query);row:EnableMouse(true)
         end
         for i=#items+1,#self.rows do self.rows[i]:Hide()end
-        self:SetHeight(-self.rowsY+math.max(1,#items)*48+8)
-        if onResize then onResize(self:GetHeight())end
+        local height=-self.rowsY+math.max(1,#items)*48+8
+        if self:GetHeight()~=height then
+            self:SetHeight(height)
+            if onResize then onResize(height)end
+        end
     end
+    A.WatchItemDataView(e)
     editors[#editors+1]=e;e:Refresh();return e
 end
 function A.BuildOptions(panel,m,L)
@@ -389,7 +416,7 @@ local function buildPanel()
             if not b.entry or not editingAllowed()then return end
             local list=A.DB().favorites;local key=A.SearchKey(b.entry)
             for n,entry in ipairs(list)do
-                if A.SearchKey(entry)==key then table.remove(list,n);A.RefreshUI();return end
+                if A.SearchKey(entry)==key then table.remove(list,n);A.InvalidateSearchDirectory();A.RefreshUI();return end
             end
             addFavorite(b.entry.itemID or b.entry.query,b.entry.group)
         end);b.favorite:SetPoint("TOPRIGHT",-3,-10)
@@ -490,7 +517,7 @@ local function buildPanel()
     end);f.action:SetPoint("BOTTOMLEFT",18,10)
     f.stop=button(f,T["停止"],62,30,function()A.Stop(T["已停止"]);A.RefreshUI()end);f.stop:SetPoint("BOTTOMLEFT",258,10)
     f.spent=label(f,"",10,"muted",true);f.spent:SetPoint("BOTTOMRIGHT",-16,18);f.spent:SetWidth(80);f.spent:SetJustifyH("RIGHT")
-    f:Hide();views[#views+1]=f;return f
+    f:Hide();A.WatchItemDataView(f);views[#views+1]=f;return f
 end
 function A.ShowPanel(preview)
     if not ns.IsModuleEnabled("auctionhouse")then return notify(T["请先启用拍卖行助手。"])end
@@ -559,27 +586,36 @@ function A.RefreshUI()
         local d=A.DB();local quick=f.tab=="quick";local recipes=f.tab=="recipes"
         f.quick:SetShown(quick);f.restock:SetShown(not quick)
         for key,b in pairs(f.tabs)do b.edge:SetShown(key==f.tab)end
-        local list={};local size=quick and QUICK_PAGE_SIZE or (recipes and 4 or 6)
+        local list,saved;local size=quick and QUICK_PAGE_SIZE or (recipes and 4 or 6)
         if quick then
             local groups=A.Categories();local valid=false
             for _,group in ipairs(groups)do if f.group==group then valid=true end end
             if not valid then f.group="全部"end
-            list=A.SearchEntries(f.group)
-            f.quick.categoryContent:SetHeight(math.ceil(#groups/CATEGORY_COLUMNS)*32)
-            for i,group in ipairs(groups)do
-                local b=f.quick.categories[i]
-                if not b then
-                    b=button(f.quick.categoryContent,"",(388+2)/CATEGORY_COLUMNS-5,26,function(self)
-                        f.group=self.group;f.page=1;A.RefreshUI()
-                    end);f.quick.categories[i]=b
-                    b.active=b:CreateTexture(nil,"OVERLAY");b.active:SetPoint("BOTTOMLEFT",3,0);b.active:SetPoint("BOTTOMRIGHT",-3,0);b.active:SetHeight(2)
-                    UI.OnTheme(function()b.active:SetColorTexture(unpack(UI.palette.accent))end)
+            list,saved=A.SearchEntries(f.group)
+            local categoriesChanged=f.quick.categoryGroups~=groups
+            if categoriesChanged then
+                f.quick.categoryContent:SetHeight(math.ceil(#groups/CATEGORY_COLUMNS)*32)
+                for i,group in ipairs(groups)do
+                    local b=f.quick.categories[i]
+                    if not b then
+                        b=button(f.quick.categoryContent,"",(388+2)/CATEGORY_COLUMNS-5,26,function(self)
+                            f.group=self.group;f.page=1;A.RefreshUI()
+                        end);f.quick.categories[i]=b
+                        b.active=b:CreateTexture(nil,"OVERLAY");b.active:SetPoint("BOTTOMLEFT",3,0);b.active:SetPoint("BOTTOMRIGHT",-3,0);b.active:SetHeight(2)
+                        UI.OnTheme(function()b.active:SetColorTexture(unpack(UI.palette.accent))end)
+                    end
+                    b.group=group;b:SetText(A.CategoryName(group));b:SetPoint("TOPLEFT",((i-1)%CATEGORY_COLUMNS)*(390/CATEGORY_COLUMNS),-math.floor((i-1)/CATEGORY_COLUMNS)*32)
+                    b:Show()
                 end
-                b.group=group;b:SetText(A.CategoryName(group));b:SetPoint("TOPLEFT",((i-1)%CATEGORY_COLUMNS)*(390/CATEGORY_COLUMNS),-math.floor((i-1)/CATEGORY_COLUMNS)*32)
-                b:Show();b.active:SetShown(group==f.group)
+                for i=#groups+1,#f.quick.categories do f.quick.categories[i]:Hide()end
+                f.quick.categoryGroups=groups
             end
-            for i=#groups+1,#f.quick.categories do f.quick.categories[i]:Hide()end
+            if categoriesChanged or f.quick.activeGroup~=f.group then
+                for i,group in ipairs(groups)do f.quick.categories[i].active:SetShown(group==f.group)end
+                f.quick.activeGroup=f.group
+            end
         else
+            list={}
             local plan=recipes and A.Recipes.Plan() or A.Plan()
             for _,entry in ipairs(plan.items)do if entry.enabled then list[#list+1]=entry end end
             f.restock.plan:SetShown(not recipes);f.restock.hint:SetShown(not recipes);f.restock.recipeHeader:SetShown(recipes)
@@ -594,19 +630,17 @@ function A.RefreshUI()
             end
         end
         local pages=math.max(1,math.ceil(#list/size));f.page=math.min(f.page,pages)
-        f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages);f.pageLabel:SetText(f.page.." / "..pages.." · "..#list..T[" 项"])
+        f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages);setText(f.pageLabel,f.page.." / "..pages.." · "..#list..T[" 项"])
         if quick then
             f.quick.empty:SetShown(#list==0)
             for i,b in ipairs(f.quick.buttons)do
                 local entry=list[(f.page-1)*size+i];b:SetShown(entry~=nil);b.entry=entry
                 if entry then
                     local attributes=A.AttributeText(entry)
-                    b.name:SetText(itemName(entry));b.icon:SetTexture(A.ItemIcon(entry.itemID))
+                    setText(b.name,itemName(entry));b.icon:SetTexture(A.ItemIcon(entry.itemID))
                     local groupName=A.CategoryName(entry.group or "常用")
-                    b.sub:SetText(ns.locale~="zhCN" and attributes or (attributes and (groupName.." · "..attributes) or groupName))
-                    local saved=false
-                    for _,v in ipairs(d.favorites)do if A.SearchKey(v)==A.SearchKey(entry)then saved=true;break end end
-                    b.favorite:SetText(saved and "★" or "＋")
+                    setText(b.sub,ns.locale~="zhCN" and attributes or (attributes and (groupName.." · "..attributes) or groupName))
+                    setText(b.favorite,saved[entry] and "★" or "＋")
                     b:SetEnabled(A.IsOpen() and d.quickSearch and not A.IsPurchasing());tooltip(b,entry.itemID,entry.query)
                 end
             end
@@ -627,12 +661,14 @@ function A.RefreshUI()
             end
         end
         local action,enabled,message=A.ActionState()
-        f.action:SetText(quick and T["编辑我的收藏"] or action);f.action:SetEnabled(quick or (enabled and d.restock))
-        f.status:SetText(quick and (statText(T["爆"])..T["=暴击 · "]..statText(T["急"])..T["=急速 · "]..statText(T["精"])..T["=精通 · "]..statText(T["全"])..T["=全能；悬停看详情"]) or message)
-        f.spent:SetText(A.Money(A.Spent()));f.spent:SetShown(not quick)
+        setText(f.action,quick and T["编辑我的收藏"] or action);f.action:SetEnabled(quick or (enabled and d.restock))
+        setText(f.status,quick and (statText(T["爆"])..T["=暴击 · "]..statText(T["急"])..T["=急速 · "]..statText(T["精"])..T["=精通 · "]..statText(T["全"])..T["=全能；悬停看详情"]) or message)
+        setText(f.spent,A.Money(A.Spent()));f.spent:SetShown(not quick)
         f.stop:SetShown(not quick);f.stop:SetEnabled(A.IsBusy())
     end
     refreshing=false
 end
 -- Inline color escapes need a text refresh as well as the normal font repaint.
 UI.OnTheme(function()A.RefreshUI()end)
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("AuctionHouseUI.lua") end

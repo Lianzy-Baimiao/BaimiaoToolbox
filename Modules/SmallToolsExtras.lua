@@ -1,6 +1,9 @@
 -- Event-driven, local-only conveniences owned by SmallTools. No invitations,
 -- queue acceptance, protected actions, chat-channel sends or persistent history.
 local ADDON,ns=...
+-- Startup-only local timer view; restored to the untouched global API on stop.
+local C_Timer = C_Timer
+if ns.StartupTimerScope then ns.StartupTimerScope("SmallToolsExtras", C_Timer, function(api) C_Timer = api end) end
 local T = ns.L
 local M={};ns.SmallToolsExtras=M
 local defaults={instanceInfo=true,queueReady=true,queueSound=true,tradeReceipt=true,
@@ -319,3 +322,5 @@ events:SetScript("OnEvent",function(_,event,a,b)
         end
     end
 end)
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("SmallToolsExtras", events, "OnEvent") end

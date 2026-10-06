@@ -894,7 +894,7 @@ L[" 等"] = " and more"
 L["（显示问号，请检查 ID / 名称）"] = "(question-mark icon; check ID / name)"
 L[" 个技能图标 · 顺序有效"] = " spell icons · Valid sequence"
 L["循环提示助手"] = "Rotation guide"
-L["选择方案、调整外观，或查看配置写法。技能顺序由你决定，冷却实时显示。"] = "Choose plans, adjust appearance or view syntax help. You define the order; cooldowns update live."
+L["选择方案、调整外观，或查看配置写法。默认只显示静态技能顺序，冷却可按需开启。"] = "Choose plans, adjust appearance or view syntax help. Static skill order is shown by default; cooldowns are optional."
 L["显示与摆放"] = "Display & position"
 L["显示循环提示助手"] = "Show rotation guide"
 L["自动显示当前职业专精的已勾选方案；切换专精自动换条。编辑其他专精不会改变屏幕上的方案。"] = "Shows enabled plans for your current specialization and switches automatically. Editing another spec does not change the active cards."
@@ -903,7 +903,7 @@ L["在「方案编辑」勾选方案。解锁后可拖动卡片、悬停查看�
 L["锁定后隐藏背景与边框"] = "Hide background and border when locked"
 L["隐藏背景不影响图标、冷却和文字；解锁后恢复背景，方便定位与拖动。"] = "Icons, cooldowns and text stay visible. Unlocking restores the background for positioning."
 L["显示技能冷却与充能"] = "Show spell cooldowns and charges"
-L["冷却圈和倒计时由游戏绘制；充能数可读取时显示在右上角。冷却不代表距离、资源或其他施放条件。"] = "Cooldowns use native game widgets; charges appear when readable. Cooldowns do not indicate range, resources or other cast requirements."
+L["默认关闭。关闭后不监听冷却或施法事件、不查询冷却与充能、不安排冷却补刷；静态技能图标保留。开启后显示冷却圈、倒计时与可读取的充能数。"] = "Off by default. When off, no cooldown or cast events are tracked, no cooldowns or charges are queried, and no cooldown retries are scheduled; static icons remain. Enable to show cooldown swipes, countdowns and readable charge counts."
 L["显示方案名称"] = "Show plan names"
 L["在图标下显示技能名称"] = "Show spell names below icons"
 L["图标大小"] = "Icon size"
@@ -1021,7 +1021,7 @@ L["停留后渐隐；渐隐为 0 时直接隐藏。修改从下次提醒或预�
 L["诊断结束：回调采样 %.1f 秒，跳过 %d 个受保护脚本，变化 %d 项。"] = "Finished: %.1f s callback sampling; %d protected scripts skipped; %d bindings changed."
 L["原生近期CPU（未插桩）：中位 %.3f%%，范围 %.3f%% ~ %.3f%%，%d 次。"] = "Native recent CPU (uninstrumented): median %.3f%%, range %.3f%% ~ %.3f%%, %d samples."
 L["原生CPU数据不可用；未自动开启CPU分析。"] = "Native CPU data unavailable; CPU profiling was not automatically enabled."
-L["覆盖指定脚本、坐标/嗜血计时器及快捷冷却内部刷新，不含安全按钮逐帧节流及其他回调。事件明细已包含在父项中。Native 为 RecentAverageTime：own=插件耗时，denominator=百分比分母；baseline=插桩前，instrumented=插桩中。计时含探针开销；原生滚动窗口重叠，不能与回调 ms/s 相减。"] = "Selected scripts, Coord/RaidCD timers and internal quick cooldown refresh only; secure per-frame throttles and other callbacks excluded. Event details are included in their parent. Native uses RecentAverageTime: own=addon time, denominator=percentage denominator; baseline=before probes, instrumented=with probes. Timing includes probe overhead; native rolling windows overlap and cannot be subtracted from callback ms/s."
+L["覆盖指定脚本、坐标/嗜血计时器及快捷冷却内部刷新，不含安全按钮逐帧节流及其他回调。事件明细已包含在父项中。Native/session 为 SessionAverageTime，其余为 RecentAverageTime：own=插件耗时，denominator=百分比分母；baseline=插桩前，instrumented=插桩中。计时含探针开销；原生滚动窗口重叠，不能与回调 ms/s 相减。"] = "Selected scripts, Coord/RaidCD timers and internal quick cooldown refresh only; secure per-frame throttles and other callbacks excluded. Event details are included in their parent. Native/session uses SessionAverageTime; others use RecentAverageTime: own=addon time, denominator=percentage denominator; baseline=before probes, instrumented=with probes. Timing includes probe overhead; native rolling windows overlap and cannot be subtracted from callback ms/s."
 L["诊断正在运行；/bmperf cancel 可取消。"] = "Diagnostic running; /bmperf cancel to cancel."
 L["请脱离战斗后运行诊断。"] = "Run diagnostics out of combat."
 L["开始30秒挂机诊断：前10秒原生采样，后20秒回调计时；请保持当前开关不变，进入战斗自动结束。"] = "Starting 30-second idle diagnostic: 10 s native sampling, then 20 s callback timing. Keep settings unchanged; combat ends sampling automatically."
@@ -1064,3 +1064,44 @@ L["距离诊断：接口未返回可用区间；0-100码表示未知，并非实
 -- Context-aware range checks
 L["距离诊断：当前目标或场景不允许安全测距，暂不调用接口。"] = "Range diagnostic: safe range checks are unavailable for this target or context; API calls are skipped."
 L["距离诊断：当前测距场景曾被拦截，本次登录已停止调用；其他安全场景不受影响。"] = "Range diagnostic: checks were blocked in this context and are disabled for this login; other safe contexts are unaffected."
+
+-- Exact native CPU metrics (on-demand diagnostics only)
+L["原生快照（未插桩）：session=列表平均，recent=最近60个tick；百分比保留4位小数。"] = "Native snapshot (no probes): session=list average, recent=last 60 ticks; percentages use 4 decimal places."
+L["累计记录（非本次新增）：peak=%s ms；>1ms=%s，>5ms=%s，>10ms=%s ticks。"] = "Cumulative history (not new in this snapshot): peak=%s ms; >1ms=%s, >5ms=%s, >10ms=%s ticks."
+
+-- Opt-in automatic UI replay
+L["暂无自动回放结果；/bmperf auto 开始。"] = "No automatic replay result yet; start with /bmperf auto."
+L["自动界面回放结束：%s，%.1f 秒。"] = "Automatic UI replay finished: %s, %.1f seconds."
+L["自动回放所需的计时接口不可用。"] = "Timing APIs required for automatic replay are unavailable."
+L["自动回放已停止；脱战后恢复界面，不再继续测试。"] = "Replay stopped; UI cleanup will finish after combat. Tests will not resume."
+L["开始自动界面回放，约40秒：自动开关展示页，无需点击。跳过在用窗口；不购买、不搜索、不传送、不改开关。/bmperf cancel 可停止。"] = "Starting automatic UI replay (~40 s): display pages open and close automatically. In-use windows are skipped. No purchases, searches, teleports or setting changes. /bmperf cancel stops it."
+L["first=本轮首次（不保证冷启动），repeatMax=重复打开最大同步耗时；计数为该阶段新增原生慢tick，含后台与诊断开销，非该窗口独占。拍卖行仅预览，不测交易；异步工作不计入同步耗时。/bmperf result 重看。"] = "first=first open this run (not necessarily cold); repeatMax=max synchronous repeated-open time. Counters are new native slow ticks in each phase, including background and diagnostic overhead, not exclusive window costs. Auction preview only; no transactions. Async work is excluded from synchronous timings. /bmperf result shows this again."
+
+-- Bounded automatic startup capture
+L["启动诊断：%s；登录后采样 %d 次，采样结束后不再后台运行。"] = "Startup diagnostics: %s; %d post-login samples. No background capture after completion."
+L["Load 是文件读取/编译/执行之间的经过时间，非独占CPU；Init 是同步初始化，包含在 Login total 中。Native 为累计峰值/计数及滚动平均，事件快照可能尚未计入当前tick；delta 相对上一采样，不能精确归因到模块。/bmperf startup 查看完整结果。"] = "Load is elapsed file read/compile/execute time, not exclusive CPU. Init is synchronous initialization, included in Login total. Native shows cumulative peaks/counters and rolling averages; event snapshots may exclude the current tick. delta is since the previous sample, not exact module attribution. /bmperf startup shows all results."
+L["暂无启动诊断数据；计时接口不可用或尚未加载。"] = "No startup data; timing API unavailable or capture not loaded."
+
+L["Callback/Slow 是指定入口的同步耗时（含子调用与探针开销，不可相加）；After 不含等待时间。t 为采集起点后的秒数，world 为进世界后的秒数，# 为采样序号。Window 仅列两次观测间最大回调，不代表原生尖峰归属；read 为本次指标读取耗时。未覆盖安全按钮、原生异步工作与其他插件。"] = "Callback/Slow measures synchronous work at explicit entry points (includes child calls and probe overhead; do not sum). After excludes the wait. t=seconds since capture start; world=seconds since world entry; #=sample index. Window lists largest callbacks between observations, not native spike attribution; read=metric read duration. Secure buttons, native async work and other addons are not covered."
+
+-- Short native LastTime observation window
+L["Tick 是 LastTime 慢观测，非唯一 tick 计数。Near 为相邻观测区间内不重复嵌套的外层回调总耗时，不保证与原生 tick 对齐，不能相减归因；observer 为探针自身耗时。短时记录自动停止。"] = "Tick is a slow LastTime observation, not a unique tick count. Near sums outer callback spans without double-counting nested calls in adjacent observation intervals; native tick alignment is not guaranteed, so do not subtract or infer attribution. observer is probe overhead. Short capture stops automatically."
+
+-- Account-wide startup diagnostic opt-in
+L["性能诊断"] = "Performance diagnostics"
+L["启动时采集性能诊断（默认关闭）"] = "Capture startup performance (off by default)"
+L["仅排查性能时开启。开启后重载界面生效；关闭立即停止采集。完成后自动输出结果并停止，不影响手动 /bmperf 诊断。"] = "Enable only for performance troubleshooting. Reload the UI after enabling; disabling stops capture immediately. Results print automatically when capture ends. Manual /bmperf diagnostics are unaffected."
+L["启动诊断默认关闭；可在工作台总览中开启，重载界面后生效。"] = "Startup diagnostics are off by default. Enable them in the workspace overview, then reload the UI."
+L["本次没有启动诊断数据；开启后需重载界面，且计时接口必须可用。"] = "No startup data for this session. Enable capture and reload the UI; a working timing API is required."
+L["采集从存档加载完成后开始；未测量本次文件加载耗时。"] = "Capture begins after saved settings load; file loading time was not measured this session."
+
+-- On-demand CPU attribution and bounded saved reports
+L["原生插件排名：一次性读取；零值、非零值与不可用分别统计，不是系统CPU百分比。"] = "Native addon ranking: one-shot read; zero, positive and unavailable values are counted separately. This is not system CPU utilization."
+L["报告已存入插件存档内存；重载或退出后写入磁盘。每类只保留最近一次，不持续采集。"] = "Report saved in addon memory; reload or log out to write it to disk. Only the latest report of each kind is kept; no continuous capture."
+L["累计排行按 selfTotal 排序，仅扣除已覆盖的嵌套子回调；inclusive 含子调用，事件明细不可重复相加。覆盖已登记事件、常驻刷新和循环冷却，不含安全脚本、其他计时器及原生异步工作。计时含探针开销，不能与 Native 滚动均值相减。"] = "Cumulative ranking uses selfTotal, excluding only covered nested callbacks. inclusive includes children; do not add event details again. Covers registered events, persistent refreshes and rotation cooldowns, not secure scripts, other timers or native asynchronous work. Timing includes probe overhead and cannot be subtracted from Native rolling averages."
+L["启动采集尚未结束；请等结束后再运行挂机归因，避免探针叠加。"] = "Startup capture is still running. Wait for it to finish before idle attribution to avoid overlapping probes."
+L["技能冷却快照已记录，无后台采样。重载界面后写入存档；无需再跑CPU采集。"] = "Spell cooldown snapshot recorded with no background sampling. Reload to write it to SavedVariables; no CPU capture is needed."
+
+-- Bounded observer isolation
+L["定位实验结束；原生窗口与回调耗时不可相减。探针阶段不是正常CPU；恢复期用于检验探针影响，不能自动归因到模块。"] = "Isolation experiment finished. Do not subtract callback times from native rolling windows. Instrumented phases are not normal CPU usage; recovery phases test observer effects, not automatic module attribution."
+L["开始90秒定位实验：未插桩、仅入口、恢复、完整函数、再恢复；每段18秒，前4秒不采原生窗口。不要移动、操作界面或改变设置；战斗/移动自动取消。/bmperf cancel 可停止。"] = "Starting a 90-second isolation experiment: raw, entry-only, recovery, full functions, recovery. Each phase is 18 seconds; native samples exclude the first 4 seconds. Do not move, interact with UI, or change settings. Combat/movement cancels; /bmperf cancel stops."

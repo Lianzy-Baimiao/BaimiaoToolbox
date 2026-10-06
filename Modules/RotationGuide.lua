@@ -9,7 +9,7 @@ local presets = {
     { name=T["惩戒骑 · AOE 第二套"], sequence="20271 > 184575 > 31884 + 255937 > 343527 > 383328 > 375576 > 53385" },
 }
 local defaults = {
-    show=true, showCooldowns=true, size=38, showNames=false,
+    show=true, showCooldowns=false, size=38, showNames=false,
     showTitles=true, opacity=0.9, hideBackgroundLocked=false, scalePercent=100, profiles={},
 }
 local function CurrentSpec()
@@ -36,6 +36,12 @@ local function copyRows(rows)
 end
 local function DB()
     local d=ns.GetDB(ID,defaults)
+    -- The old default was persisted as true. Reset once to make cooldowns
+    -- explicitly opt-in for existing profiles too; later user choices survive.
+    if not d.cooldownOptInVersion then
+        d.showCooldowns=false
+        d.cooldownOptInVersion=1
+    end
     if not d.profileVersion then
         -- Old global rows had no specialization identity. Keep an untouched backup.
         if d.rows then
@@ -62,10 +68,6 @@ local function Profile(spec)
     local key=tostring(spec)
     profiles[key]=profiles[key] or {rows=freshRows(spec)}
     return profiles[key]
-end
-local function ActiveRows()
-    local profile=Profile(CurrentSpec())
-    return profile and profile.rows or {}
 end
 -- The editor selection never changes the active gameplay profile.
 local editorSpec,editorClass
@@ -165,7 +167,7 @@ local function Resolve(spell)
     local ok,info=false,nil
     if C_Spell and C_Spell.GetSpellInfo then ok,info=pcall(C_Spell.GetSpellInfo,spell) end
     if ok and type(info)=="table" and info.iconID then
-        return info.iconID,info.name or tostring(spell),true
+        return info.iconID,info.name or tostring(spell),true,info.spellID
     end
     return 134400,fallbackNames[spell] or tostring(spell),false
 end
@@ -248,10 +250,18 @@ local events=CreateFrame("Frame")
 local function newQueryCache() return {seen={},values={}} end
 local chargesCache,chargeDurationCache=newQueryCache(),newQueryCache()
 local cooldownCache,cooldownDurationCache=newQueryCache(),newQueryCache()
+local chargeDisplayCache=newQueryCache()
+-- Override IDs are shared only during a metadata refresh, never across events.
+local overrideCache,baseCache=newQueryCache(),newQueryCache()
+local function publicSpellID(value)
+    return not secret(value) and type(value)=="number" and value>0
+        and value<=2147483647 and value==math.floor(value)
+end
 local function clearQueryCache(cache) wipe(cache.seen);wipe(cache.values) end
 local function clearCooldownQueries()
     clearQueryCache(chargesCache);clearQueryCache(chargeDurationCache)
     clearQueryCache(cooldownCache);clearQueryCache(cooldownDurationCache)
+    clearQueryCache(chargeDisplayCache)
 end
 local function query(fn,spell,cache)
     if not fn then return nil end
@@ -263,24 +273,60 @@ local function query(fn,spell,cache)
     end
     if ok then return value end
 end
-local function paintCooldown(cell)
+-- Retain only safe presentation scalars. Duration objects may mutate in place;
+-- always forward those to the native widget, never compare or cache them.
+local function clearCooldown(cell)
+    if cell._cooldownMode~="clear" then cell.cooldown:Clear() end
+    cell._cooldownMode="clear"
+    cell._cooldownStart,cell._cooldownLength,cell._cooldownRate=nil,nil,nil
+end
+local function paintChargeText(cell,value)
+    -- Like native spell buttons, forward restricted display text directly to
+    -- the FontString. Never compare/stringify it or keep it as a write cache.
+    if secret(value) then
+        cell._chargeText=nil
+        if pcall(cell.charges.SetText,cell.charges,value) then return end
+        value="" -- Failed native write: clear stale text, retry next event.
+    end
+    if cell._chargeText~=value then
+        cell.charges:SetText(value)
+        cell._chargeText=value
+    end
+end
+local function paintCooldown(cell,showCooldowns)
     local cd=cell.cooldown
-    cd:Clear();cell.charges:SetText("")
-    if not DB().showCooldowns or not cell.spell or not C_Spell then return end
+    if cd:IsShown()~=(showCooldowns and true or false) then cd:SetShown(showCooldowns and true or false) end
+    if not showCooldowns or not cell.spell or not C_Spell then
+        clearCooldown(cell);paintChargeText(cell,"");return
+    end
     local charges=query(C_Spell.GetSpellCharges,cell.spell,chargesCache)
-    local charging=false
+    local multipleCharges,charging,chargeText=false,false,""
     if type(charges)=="table" then
         local current,maximum=charges.currentCharges,charges.maxCharges
-        if not secret(current) and not secret(maximum) and type(current)=="number" and type(maximum)=="number" and maximum>1 then
-            cell.charges:SetText(current)
+        multipleCharges=not secret(maximum) and type(maximum)=="number" and maximum>1
+        if multipleCharges and not secret(current) and type(current)=="number" then
+            chargeText=current
             charging=current<maximum
         end
     end
-    -- Duration objects are passed straight to the native widget, including in combat.
-    local duration=query(C_Spell.GetSpellChargeDuration,cell.spell,chargeDurationCache)
+    if multipleCharges then
+        local display=query(C_Spell.GetSpellDisplayCount,cell.spell,chargeDisplayCache)
+        if secret(display) or type(display)=="string" then chargeText=display end
+    end
+    paintChargeText(cell,chargeText)
+    -- A successful setter replaces the old swipe; clearing it first is redundant.
+    -- Single-charge spells can still return a charge duration handle. Its
+    -- presence does not make it the spell's active cooldown (e.g. 184575,
+    -- 255937). Only genuine multi-charge spells use the recharge path.
+    -- Keep this decision independent of the possibly restricted current count.
+    local duration=multipleCharges and query(C_Spell.GetSpellChargeDuration,cell.spell,chargeDurationCache)
     if not duration then duration=query(C_Spell.GetSpellCooldownDuration,cell.spell,cooldownDurationCache) end
     if duration and cd.SetCooldownFromDurationObject then
-        if pcall(cd.SetCooldownFromDurationObject,cd,duration) then return end
+        cell._cooldownMode=nil
+        cell._cooldownStart,cell._cooldownLength,cell._cooldownRate=nil,nil,nil
+        if pcall(cd.SetCooldownFromDurationObject,cd,duration) then
+            cell._cooldownMode="duration";return
+        end
     end
     local info=query(C_Spell.GetSpellCooldown,cell.spell,cooldownCache)
     local start,length,rate
@@ -288,34 +334,153 @@ local function paintCooldown(cell)
         start,length,rate=charges.cooldownStartTime,charges.cooldownDuration,charges.chargeModRate
     elseif type(info)=="table" then
         -- Exclude a pure global cooldown when the API exposes this flag.
-        if not secret(info.isOnGCD) and info.isOnGCD==true then return end
+        if not secret(info.isOnGCD) and info.isOnGCD==true then clearCooldown(cell);return end
         start,length,rate=info.startTime,info.duration,info.modRate
     end
-    if secret(start) or secret(length) or secret(rate) then return end
+    if secret(start) or secret(length) or secret(rate) then clearCooldown(cell);return end
     if type(start)=="number" and type(length)=="number" and length>0 then
-        pcall(cd.SetCooldown,cd,start,length,type(rate)=="number" and rate or 1)
+        rate=type(rate)=="number" and rate or 1
+        if cell._cooldownMode=="numeric" and cell._cooldownStart==start
+            and cell._cooldownLength==length and cell._cooldownRate==rate then return end
+        if pcall(cd.SetCooldown,cd,start,length,rate) then
+            cell._cooldownMode="numeric"
+            cell._cooldownStart,cell._cooldownLength,cell._cooldownRate=start,length,rate
+            return
+        end
+        -- A failed setter must retry next time, not leave stale cached success.
+        cell._cooldownMode=nil
     end
+    clearCooldown(cell)
 end
-local function updateCooldowns()
-    events:SetScript("OnUpdate",nil)
+local cooldownTask = {profileRefresh=true}
+local function paintCooldowns(selected)
+    local showCooldowns=DB().showCooldowns
     clearCooldownQueries()
     for _,f in pairs(frames) do
-        if f:IsVisible() then
-            for _,cell in ipairs(f.cells) do if cell:IsShown() then paintCooldown(cell) end end
+        if not showCooldowns or f:IsVisible() then
+            for _,cell in ipairs(f.cells) do
+                if not showCooldowns or (cell:IsShown() and (not selected or selected[cell])) then paintCooldown(cell,showCooldowns) end
+            end
         end
     end
     -- Do not retain API tables or duration objects between frames.
     clearCooldownQueries()
 end
-local function queueCooldowns()
-    if events:GetScript("OnUpdate") or not DB().showCooldowns then return end
-    for _,f in pairs(frames) do
-        if f:IsVisible() then
-            -- Cooldown and charge events in the same frame need one repaint.
-            events:SetScript("OnUpdate",updateCooldowns)
-            return
+cooldownTask.run = paintCooldowns
+ns.IdleTasks = ns.IdleTasks or {}
+ns.IdleTasks.RotationCooldown = cooldownTask
+-- Named events union their visible cells; a global/ambiguous event dominates.
+local pendingCells,pendingAll={},false
+local recovery,recoveryScheduled,recoveryGeneration={},false,0
+local function cancelCooldownWork()
+    events:SetScript("OnUpdate",nil)
+    wipe(pendingCells);pendingAll=false
+    wipe(recovery);recoveryScheduled=false;recoveryGeneration=recoveryGeneration+1
+end
+local function updateCooldowns(preserveRecovery)
+    if preserveRecovery and DB().showCooldowns then
+        events:SetScript("OnUpdate",nil);wipe(pendingCells);pendingAll=false
+    else cancelCooldownWork() end
+    return cooldownTask.run()
+end
+local function canQueueCooldowns()
+    return ns.IsModuleEnabled(ID) and DB().showCooldowns and DB().show
+end
+local function syncCooldownEvents()
+    if canQueueCooldowns() then
+        events:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+        events:RegisterEvent("SPELL_UPDATE_CHARGES")
+        events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED","player")
+    else
+        events:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
+        events:UnregisterEvent("SPELL_UPDATE_CHARGES")
+        events:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+        cancelCooldownWork()
+    end
+end
+local function flushCooldowns()
+    events:SetScript("OnUpdate",nil)
+    if canQueueCooldowns() then
+        if pendingAll then cooldownTask.run() else cooldownTask.run(pendingCells) end
+    end
+    wipe(pendingCells);pendingAll=false
+end
+local function scheduleCooldowns()
+    if not events:GetScript("OnUpdate") then events:SetScript("OnUpdate",flushCooldowns) end
+end
+-- Bounded readbacks: first wake at 100 ms, final at 500 ms after the latest
+-- matching event/cast (plus frame scheduling). Overlapping waves share a wake.
+-- A single timer services all cells. New events merge, never create a ticker;
+-- only public timing scalars are retained, not native duration/API objects.
+local scheduleRecovery
+scheduleRecovery=function()
+    if recoveryScheduled or not C_Timer or not C_Timer.After then return end
+    local deadline
+    for _,state in pairs(recovery) do
+        if not deadline or state.next<deadline then deadline=state.next end
+    end
+    if not deadline then return end
+    recoveryScheduled=true
+    local generation=recoveryGeneration
+    C_Timer.After(math.max(0.001,deadline-GetTime()),function()
+        if generation~=recoveryGeneration then return end
+        recoveryScheduled=false
+        if not canQueueCooldowns() then cancelCooldownWork();return end
+        local now,dirty=GetTime(),false
+        for cell,state in pairs(recovery) do
+            if not cell:IsVisible() then recovery[cell]=nil
+            elseif state.next<=now then
+                pendingCells[cell]=true;dirty=true
+                if state.final>now then state.next=state.final else recovery[cell]=nil end
+            end
+        end
+        if dirty then scheduleCooldowns() end
+        scheduleRecovery()
+    end)
+end
+local function recoverCell(cell,now)
+    local state=recovery[cell] or {}
+    state.next,state.final=now+0.1,now+0.5
+    recovery[cell]=state
+end
+local function matchesCooldown(cell,spellID)
+    return spellID and (cell.cooldownSourceID==spellID or cell.spell==spellID
+        or cell.cooldownBaseID==spellID or cell.cooldownLiveBaseID==spellID)
+end
+local function emptyCategory(value)
+    return not secret(value) and (value==nil or (type(value)=="number" and value==0))
+end
+local function queueCooldowns(spellID,baseSpellID,category,startRecoveryCategory,itemID,cast)
+    if not canQueueCooldowns() then return end
+    -- Nil means update-all. Secret/invalid/shared/GCD/item scopes fail open.
+    local named=publicSpellID(spellID) and (not secret(baseSpellID)
+        and (baseSpellID==nil or publicSpellID(baseSpellID)))
+        and emptyCategory(category) and emptyCategory(startRecoveryCategory) and emptyCategory(itemID)
+    local all=not named
+    if named then
+        for _,f in pairs(frames) do
+            if f:IsVisible() then
+                for _,cell in ipairs(f.cells) do
+                    if cell:IsShown() and not cell.cooldownScopeKnown then all=true;break end
+                end
+            end
+            if all then break end
         end
     end
+    local dirty,now=false,GetTime()
+    for _,f in pairs(frames) do
+        if f:IsVisible() then
+            for _,cell in ipairs(f.cells) do
+                if cell:IsShown() and (all or matchesCooldown(cell,spellID) or matchesCooldown(cell,baseSpellID)) then
+                    pendingCells[cell]=true;dirty=true
+                    if named or cast then recoverCell(cell,now) end
+                end
+            end
+        end
+    end
+    if not dirty then return end
+    if all then pendingAll=true end
+    scheduleCooldowns();scheduleRecovery()
 end
 local function createCell(f)
     local cell=CreateFrame("Frame",nil,f)
@@ -360,13 +525,46 @@ local function createCell(f)
     cell.badgeBg:SetColorTexture(0.04,0.05,0.06,0.94)
     return cell
 end
-local function eligible()
-    return ns.IsModuleEnabled(ID) and DB().show and CurrentSpec()~=nil
+-- Spell events can change cache readiness, names and icons, but not the user's
+-- sequence or its geometry. Keep the source even while Resolve cannot find it.
+local function refreshSpell(cell)
+    local texture,name,valid,resolvedID=Resolve(cell.sourceSpell)
+    cell.icon:SetTexture(texture)
+    local spell=valid and cell.sourceSpell or nil
+    if spell then
+        -- Native spell info can already show the replacement icon while the
+        -- configured ID still queries the original cooldown. Keep the saved
+        -- source unchanged, but use the current override for live cooldowns.
+        local override=query(C_Spell and C_Spell.GetOverrideSpell,spell,overrideCache)
+        if not secret(override) and type(override)=="number" and override>0
+            and override<=2147483647 and override==math.floor(override) then
+            spell=override
+        end
+    end
+    if cell.spell~=spell then clearCooldown(cell);paintChargeText(cell,"") end
+    cell.spell=spell
+    -- Build aliases only with spell metadata, never on a hot cooldown event.
+    -- A configured replacement or name must also match its base spell event.
+    if DB().showCooldowns then
+        local sourceID=publicSpellID(cell.sourceSpell) and cell.sourceSpell or resolvedID
+        local base=query(C_Spell and C_Spell.GetBaseSpell,cell.sourceSpell,baseCache)
+        local liveBase=spell and query(C_Spell and C_Spell.GetBaseSpell,spell,baseCache)
+        cell.cooldownSourceID=publicSpellID(sourceID) and sourceID or nil
+        cell.cooldownBaseID=publicSpellID(base) and base or nil
+        cell.cooldownLiveBaseID=publicSpellID(liveBase) and liveBase or nil
+        cell.cooldownScopeKnown=cell.cooldownSourceID~=nil and cell.cooldownBaseID~=nil and cell.cooldownLiveBaseID~=nil
+    else
+        cell.cooldownSourceID,cell.cooldownBaseID,cell.cooldownLiveBaseID=nil,nil,nil
+        cell.cooldownScopeKnown=false
+    end
+    cell.displayName=name
+    cell.name:SetText(literal(name))
+    cell.badge:SetText(cell.repeatCount and ("x"..cell.repeatCount) or (valid and "" or "?"))
+    cell.badgeBg:SetShown(cell.repeatCount~=nil or not valid)
 end
-local function Render(index,nodes)
-    local d=DB();local row=ActiveRows()[index]
+local function Render(index,nodes,row,d,spec)
     local f=frames[index] or createRow(index)
-    f.specID=CurrentSpec()
+    f.specID=spec
     local scale=math.max(50,math.min(200,tonumber(d.scalePercent) or 100))/100
     local size=math.max(24,math.min(64,tonumber(d.size) or 38))
     local hasBranches=false
@@ -374,6 +572,7 @@ local function Render(index,nodes)
     local cellWidth=math.max(size,d.showNames and 76 or 0,hasBranches and 40 or 0)
     local gap=22
     local unlocked=not f:IsLocked()
+    f.renderedLocked=not unlocked
     local top=((d.showTitles or unlocked) and 34 or 12)+(hasBranches and 18 or 0)
     if not unlocked and f._moving then f:StopMovingOrSizing();f._moving=nil;f:SavePosition() end
     f.close:SetShown(unlocked)
@@ -404,35 +603,63 @@ local function Render(index,nodes)
         cell.icon:SetSize(size,size);cell.icon:ClearAllPoints();cell.icon:SetPoint("TOP",0,0)
         cell.branch:ClearAllPoints();cell.branch:SetPoint("BOTTOM",cell.icon,"TOP",0,3)
         cell.branch:SetSize(cellWidth,15);cell.branch:SetText(node.branch or "");cell.branch:SetShown(node.branch~=nil)
-        local texture,name,valid=Resolve(node.spell)
-        cell.icon:SetTexture(texture)
-        cell.spell=valid and node.spell or nil
-        cell.displayName=name
+        cell.sourceSpell,cell.repeatCount=node.spell,node.count
+        refreshSpell(cell)
         cell.hit:EnableMouse(unlocked)
         if not unlocked then hideTip(cell.hit) end
         cell.name:ClearAllPoints();cell.name:SetPoint("TOP",cell.icon,"BOTTOM",0,-5)
-        cell.name:SetSize(cellWidth,26);cell.name:SetText(literal(name));cell.name:SetShown(d.showNames)
+        cell.name:SetSize(cellWidth,26);cell.name:SetShown(d.showNames)
         cell.connector:ClearAllPoints();cell.connector:SetPoint("RIGHT",cell,"LEFT",-4,-size/2+lineHeight/2)
         -- ASCII separators use the game's font; no external glyph/icon font.
         cell.connector:SetText(node.join);cell.connector:SetShown(i>1)
         cell.badge:SetPoint("BOTTOMRIGHT",cell.icon,"BOTTOMRIGHT",-2,2)
-        cell.badge:SetText(node.count and ("x"..node.count) or (valid and "" or "?"))
         cell.badgeBg:ClearAllPoints();cell.badgeBg:SetPoint("BOTTOMRIGHT",cell.icon,"BOTTOMRIGHT",0,0)
         cell.badgeBg:SetSize(node.count and (#node.count*7+13) or 16,15)
-        cell.badgeBg:SetShown(node.count~=nil or not valid)
         cell:Show()
     end
     for i=#nodes+1,#f.cells do f.cells[i]:Hide() end
     f:ApplyPosition();f:ApplyLockVisual();f:Show()
 end
+local renderedSpec,renderedEnabled,renderedWidth
 Refresh=function()
+    syncCooldownEvents()
+    clearQueryCache(overrideCache);clearQueryCache(baseCache)
+    local d,spec=DB(),CurrentSpec()
+    local enabled=ns.IsModuleEnabled(ID) and d.show and spec~=nil
+    local rows=enabled and Profile(spec).rows
     for i=1,MAX_SLOTS do
-        local row=ActiveRows()[i]
-        local nodes=row and Parse(row.sequence)
-        if eligible() and row and row.enabled and nodes and #nodes>0 then Render(i,nodes)
+        local row=rows and rows[i]
+        local nodes=row and row.enabled and Parse(row.sequence)
+        if nodes and #nodes>0 then Render(i,nodes,row,d,spec)
         elseif frames[i] then frames[i]:Hide() end
     end
+    renderedSpec,renderedEnabled,renderedWidth=spec,enabled,UIParent:GetWidth()
+    clearQueryCache(overrideCache);clearQueryCache(baseCache)
     paint();updateCooldowns()
+end
+local function refreshSpellData()
+    local spec=CurrentSpec()
+    local enabled=ns.IsModuleEnabled(ID) and DB().show and spec~=nil
+    if spec~=renderedSpec or enabled~=renderedEnabled or UIParent:GetWidth()~=renderedWidth then
+        Refresh();return
+    end
+    for _,f in pairs(frames) do
+        if f:IsShown() and f:IsLocked()~=f.renderedLocked then Refresh();return end
+    end
+    -- Settings callbacks always use the full Refresh. This path is only for
+    -- game notifications with the same profile, viewport and lock state.
+    clearQueryCache(overrideCache);clearQueryCache(baseCache)
+    for _,f in pairs(frames) do
+        if f:IsShown() then
+            for _,cell in ipairs(f.cells) do
+                if cell:IsShown() then refreshSpell(cell) end
+            end
+        end
+    end
+    clearQueryCache(overrideCache);clearQueryCache(baseCache)
+    -- Same-profile metadata may precede usable cooldown data. Keep bounded
+    -- recovery; it reads the cell's newly resolved spell, not an old alias.
+    updateCooldowns(true)
 end
 local function Status(i)
     local nodes,err=Parse(EditorRows()[i].sequence)
@@ -457,7 +684,7 @@ local function BuildOptions(panel,m,L)
     editorClass=classID
     editorSpec=CurrentSpec() or (Specs(classID)[1] or {}).value or 70
     L:Title(T["循环提示助手"])
-    L:Text(T["选择方案、调整外观，或查看配置写法。技能顺序由你决定，冷却实时显示。"],true)
+    L:Text(T["选择方案、调整外观，或查看配置写法。默认只显示静态技能顺序，冷却可按需开启。"],true)
     local entries={
         {name=T["显示与布局"],width=150,build=function(_,L)
     L:Section(T["显示与摆放"])
@@ -476,7 +703,7 @@ local function BuildOptions(panel,m,L)
     L:Slider("BaimiaoRotationScale",T["整体缩放（%）"],50,200,5,function() return DB().scalePercent end,
         function(v) DB().scalePercent=v end,Refresh)
     L:Check(T["显示技能冷却与充能"],function() return DB().showCooldowns end,function(v) DB().showCooldowns=v end,Refresh)
-    L:Text(T["冷却圈和倒计时由游戏绘制；充能数可读取时显示在右上角。冷却不代表距离、资源或其他施放条件。"],true)
+    L:Text(T["默认关闭。关闭后不监听冷却或施法事件、不查询冷却与充能、不安排冷却补刷；静态技能图标保留。开启后显示冷却圈、倒计时与可读取的充能数。"],true)
     L:Check(T["显示方案名称"],function() return DB().showTitles end,function(v) DB().showTitles=v end,Refresh)
     L:Check(T["在图标下显示技能名称"],function() return DB().showNames end,function(v) DB().showNames=v end,Refresh)
     L:Slider("BaimiaoRotationSize",T["图标大小"],24,64,1,function() return DB().size end,function(v) DB().size=v end,Refresh)
@@ -578,16 +805,21 @@ local function BuildOptions(panel,m,L)
     m.rotationTabs=Tabs(panel,L,entries)
 end
 
-events:SetScript("OnEvent",function(_,event)
-    if event=="SPELL_UPDATE_COOLDOWN" or event=="SPELL_UPDATE_CHARGES" then queueCooldowns() else Refresh() end
+events:SetScript("OnEvent",function(_,event,arg1,arg2,arg3,arg4,arg5)
+    if event=="SPELL_UPDATE_COOLDOWN" then queueCooldowns(arg1,arg2,arg3,arg4,arg5)
+    elseif event=="SPELL_UPDATE_CHARGES" then queueCooldowns()
+    elseif event=="UNIT_SPELLCAST_SUCCEEDED" then
+        if not secret(arg1) and arg1=="player" then queueCooldowns(arg3,nil,nil,nil,nil,true) end
+    elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then Refresh()
+    else refreshSpellData() end
 end)
 local function setupEvents()
-    events:RegisterEvent("SPELL_UPDATE_COOLDOWN")
-    events:RegisterEvent("SPELL_UPDATE_CHARGES")
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
     events:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     events:RegisterEvent("PLAYER_TALENT_UPDATE")
     events:RegisterEvent("SPELLS_CHANGED")
+    events:RegisterEvent("SPELL_UPDATE_ICON")
+    events:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
     events:RegisterEvent("UI_SCALE_CHANGED")
     events:RegisterEvent("DISPLAY_SIZE_CHANGED")
 end
@@ -601,6 +833,20 @@ ns.RegisterModule({id=ID,name=T["循环提示助手"],desc=T["按职业专精自
         ns.UI.OnTheme(paint)
         Refresh()
     end,
-    OnDisable=function() events:UnregisterAllEvents();events:SetScript("OnUpdate",nil);clearCooldownQueries();for _,f in pairs(frames) do f:Hide() end end,
+    OnDisable=function() events:UnregisterAllEvents();cancelCooldownWork();clearCooldownQueries();clearQueryCache(overrideCache);clearQueryCache(baseCache);for _,f in pairs(frames) do f:Hide() end end,
     OnToggle=function(_,on) if on then setupEvents() end;Refresh() end,
 })
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("Rotation", events, "OnEvent") end
+if ns.StartupWatchSlot then ns.StartupWatchSlot("Rotation/Cooldowns", cooldownTask, "run") end
+
+-- Manual current-run attribution: no wrapping or timing while diagnostics are off.
+if ns.PerfWatchFunction then
+    ns.PerfWatchFunction("Rotation/query", function() return query end, function(fn) query=fn end)
+    ns.PerfWatchFunction("Rotation/paintCooldown", function() return paintCooldown end, function(fn) paintCooldown=fn end)
+    ns.PerfWatchFunction("Rotation/paintChargeText", function() return paintChargeText end, function(fn) paintChargeText=fn end)
+    ns.PerfWatchFunction("Rotation/clearCooldown", function() return clearCooldown end, function(fn) clearCooldown=fn end)
+    ns.PerfWatchFunction("Rotation/DB", function() return DB end, function(fn) DB=fn end)
+end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("RotationGuide.lua") end

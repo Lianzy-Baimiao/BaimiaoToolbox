@@ -1,6 +1,9 @@
 -- Current party only. Public, self-reported keys; no inspection, persistent
 -- history or chat spam. Protocol adapters are independent of the four-row UI.
 local ADDON,ns=...
+-- Startup-only local timer view; restored to the untouched global API on stop.
+local C_Timer = C_Timer
+if ns.StartupTimerScope then ns.StartupTimerScope("PartyKeystones", C_Timer, function(api) C_Timer = api end) end
 local T = ns.L
 local K={};ns.PartyKeystones=K
 local frame=CreateFrame("Frame")
@@ -134,10 +137,15 @@ function K.Request()
     for _,prefix in ipairs(prefixes)do send(prefix,P.Request(prefix))end
     for _,prefix in ipairs(prefixes)do announce(prefix)end
 end
-local function store(row,map,level,source)
+local function store(row,map,level,source,rosterChanged)
     map,level=pair(map,level)
     if not map or not row.online then return end
-    cache[row.guid]={mapID=map,level=level,time=GetTime(),source=source}
+    local now=GetTime();local previous=cache[row.guid]
+    if not rosterChanged and previous and previous.mapID==map and previous.level==level and previous.source==source
+        and now-previous.time<=600 then
+        previous.time=now;return -- Keep the TTL fresh without repainting identical rows.
+    end
+    cache[row.guid]={mapID=map,level=level,time=now,source=source}
     changed()
 end
 -- Decode only current peers, with a bounded token bucket per GUID. OpenRaid also
@@ -152,11 +160,24 @@ end
 local function receive(prefix,message,ch,sender)
     if not active() or not str(prefix) or not str(message) or not str(ch) or #message>(prefix=="LRS" and 255 or 100) then return end
     if ch~=channel() or not P.Supports(prefix,ch) then return end
-    rebuild();local row=member(sender);if not row or not row.online then return end
-    if prefix=="LRS" and not canDecode(row) then return end
-    local kind,map,level=P.Read(prefix,message)
+    local kind,map,level
+    if prefix=="LRS" then
+        -- Reject unsupported AceComm fragments before roster work or token use.
+        -- An escaped single packet (control 4) still needs its payload decoded.
+        local control=message:byte(1)
+        if control<=9 and (control~=4 or #message==1) then return end
+    else
+        -- Plaintext parsing is bounded and cheap; unrelated traffic needs no roster.
+        kind,map,level=P.Read(prefix,message)
+        if kind~="request" and (kind~="key" or not pair(map,level)) then return end
+    end
+    local rosterChanged=rebuild();local row=member(sender);if not row or not row.online then return end
+    if prefix=="LRS" then
+        if not canDecode(row) then return end
+        kind,map,level=P.Read(prefix,message)
+    end
     if kind=="request" then announce(prefix)
-    elseif kind=="key" then store(row,map,level,T["队友同步"])end
+    elseif kind=="key" then store(row,map,level,T["队友同步"],rosterChanged)end
 end
 function K.Snapshot()
     if not active() then return {} end
@@ -193,11 +214,13 @@ frame:SetScript("OnEvent",function(_,event,...)
     elseif event:find("^CHAT_MSG_") then
         local message,sender=...
         if not str(message) or #message>2048 then return end
+        local map,level=message:match("|Hkeystone:%d+:(%d+):(%d+):")
+        map,level=pair(map,level)
+        if not map then return end
         local ch=event:find("INSTANCE") and "INSTANCE_CHAT" or "PARTY"
         if ch~=channel() then return end
-        rebuild();local row=member(sender);if not row then return end
-        local map,level=message:match("|Hkeystone:%d+:(%d+):(%d+):")
-        if map then store(row,map,level,T["队友分享的钥石链接"])end
+        local rosterChanged=rebuild();local row=member(sender);if not row then return end
+        store(row,map,level,T["队友分享的钥石链接"],rosterChanged)
     elseif event=="PLAYER_LEAVING_WORLD" then cache={};decodeBudget={};changed()
     elseif event=="CHALLENGE_MODE_START" then cache={};changed()
     elseif event=="GROUP_ROSTER_UPDATE" then
@@ -213,3 +236,7 @@ frame:SetScript("OnEvent",function(_,event,...)
         end
     end
 end)
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("PartyKeystones", frame, "OnEvent") end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("Keystone library + protocols + PartyKeystones.lua") end

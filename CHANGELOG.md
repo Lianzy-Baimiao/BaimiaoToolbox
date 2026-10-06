@@ -1,3 +1,53 @@
+## 1.9.20 — 2026-10-07
+
+## English
+### Static spell-sequence reminders by default
+- Skill cooldowns and charge counts are now opt-in. Open /bmrotation → Display and layout → Show skill cooldowns and charges to enable them.
+- Existing profiles switch to static mode once on upgrade; subsequent manual choices are preserved. Plans, icons, names, notes, layout, and specialization handling remain available.
+- Turning cooldowns off unregisters cooldown/charge/player-cast listeners, stops pending refresh work, and clears cooldown/charge overlays instead of continuing to query behind hidden visuals.
+- When enabled, normal, replacement-spell, and charge-recovery cooldowns are supported. Targeted event refreshes retain bounded recovery for late data.
+
+### Less repeated work
+- Reduced synchronous login initialization and unnecessary rebuilds in quick buttons and settings-related UI.
+- Bloodlust ready-state monitoring primarily wakes on aura/lifecycle events, with low-frequency recovery checks retained. Battle-resurrection cooldown handling filters unrelated events when safe; countdowns, music, and combat restrictions remain supported.
+- Reduced redundant coordinate, quick-button, reminder, Auction House, and Mythic+ refresh work with state-aware scheduling and cache invalidation.
+
+### Diagnostics
+- Startup capture has a settings switch and is disabled by default. Enabling applies after a reload; disabling stops the capture. Completed captures do not keep sampling in the background.
+- Expanded opt-in /bmperf reports distinguish recent CPU from session averages and expose selected callback/query costs. Reports can be saved for inspection after reload. Native counters and covered callbacks are not a complete per-module CPU breakdown.
+
+### Installation and validation
+- 1,154 offline regression tests passed. A live static-mode capture confirmed zero Rotation cooldown queries/refreshes during tracing while other modules received cooldown events. No fixed whole-addon CPU percentage is promised.
+- Retail only; English, Simplified Chinese, Traditional Chinese, and Korean remain supported.
+- Fully exit the game, replace the addon folder, then restart. Keep SavedVariables; do not reset all settings. Only the cooldown default is migrated once.
+- The ZIP contains runtime files and licenses only: no audio, private captures, tests, or publishing documents.
+
+---
+
+## 中文
+### 循环提示默认改为静态显示
+- 技能冷却与充能层数改为默认关闭。需要时在 /bmrotation → 显示与布局 → 显示技能冷却与充能 中开启。
+- 已有配置升级后只切换为静态模式一次，之后保留手动选择；方案、图标、名称、备注、布局与专精切换继续可用。
+- 关闭时退订冷却／充能／玩家施法监听，停止待执行刷新并清除冷却和充能显示，不再只是隐藏界面而继续后台查询。
+- 开启后支持普通技能、替换技能以及充能恢复冷却；事件定向刷新保留数据晚到时的有界恢复。
+
+### 减少重复工作
+- 减少快捷按钮及设置相关界面的同步登录初始化与不必要重建。
+- 嗜血就绪态主要由光环及生命周期事件唤醒，同时保留低频恢复校验；战复冷却在安全条件下过滤无关事件，保留倒计时、音乐和战斗限制处理。
+- 通过按状态调度和缓存失效，减少坐标、快捷按钮、提醒、拍卖行与史诗钥石界面的重复刷新。
+
+### 性能诊断
+- 启动采集增加设置开关，默认关闭；开启后重载生效，关闭立即停止，采集完成后不继续后台采样。
+- 扩展按需运行的 /bmperf 报告，区分近期 CPU 与会话平均，提供指定回调／查询耗时，并可保存报告供重载后检查。原生计数和回调覆盖不是完整模块 CPU 分账。
+
+### 安装与验证
+- 1154 项离线回归测试通过；本次实机静态模式追踪中，循环冷却查询／刷新为 0，同期其他模块仍收到冷却事件。不承诺整个插件固定 CPU 百分比。
+- 仅支持正式服，保留英文、简体中文、繁体中文与韩语。
+- 请完全退出游戏后覆盖插件文件夹，再启动游戏；保留 SavedVariables，无需清空设置，仅对冷却默认值做一次迁移。
+- ZIP 仅包含运行文件与许可证，不含音频、私人采集、测试或发布说明文档。
+
+---
+
 ## 1.9.19 — 2026-10-06
 
 ## English

@@ -56,26 +56,51 @@ local attributes={
 }
 function A.Attributes(entry)return entry.itemID and attributes[entry.itemID] or nil end
 function A.SearchKey(entry)return entry.itemID and ("id:"..entry.itemID) or ("q:"..(entry.query or ""))end
-function A.SearchEntries(group)
-    local result,seen={},{}
-    local function add(entry)
-        local key=A.SearchKey(entry)
-        if not seen[key]then result[#result+1]=entry;seen[key]=true end
+-- One current directory of entry references; no item names, prices or inventory.
+-- In-place favorite edits/reordering must invalidate BEFORE triggering a refresh.
+-- Replacing/clearing the saved list is also detected by identity and length.
+local searchCache
+local emptySearchEntries={}
+function A.InvalidateSearchDirectory()searchCache=nil end
+local function searchDirectory()
+    local favorites=A.DB().favorites
+    if searchCache and searchCache.source==favorites and searchCache.count==#favorites then return searchCache end
+    local lists,seen,keys,savedKeys={},{},{},{}
+    local groups,seenGroups={},{}
+    for _,group in ipairs(A.categoryOrder)do groups[#groups+1]=group;seenGroups[group]=true end
+    local function add(group,entry,key)
+        group=group or false
+        if not lists[group]then lists[group]={};seen[group]={}end
+        if not seen[group][key]then
+            lists[group][#lists[group]+1]=entry;seen[group][key]=true
+        end
     end
-    if group=="收藏"then return A.DB().favorites end
-    for _,entry in ipairs(A.catalog)do if group=="全部" or group==entry.group then add(entry)end end
-    for _,entry in ipairs(A.DB().favorites)do if group=="全部" or group==entry.group then add(entry)end end
-    return result
-end
-function A.Categories()
-    local out,seen={},{}
-    for _,group in ipairs(A.categoryOrder)do out[#out+1]=group;seen[group]=true end
-    for _,entry in ipairs(A.DB().favorites)do
+    local function index(entry)
+        local key=A.SearchKey(entry);keys[entry]=key
+        add("全部",entry,key)
+        if entry.group~="全部" and entry.group~="收藏"then add(entry.group,entry,key)end
+        return key
+    end
+    -- Builtins retain precedence in All/their group; favorites keep their own order.
+    for _,entry in ipairs(A.catalog)do index(entry)end
+    for _,entry in ipairs(favorites)do
+        savedKeys[index(entry)]=true
         local group=entry.group or "常用"
-        if not seen[group]then out[#out+1]=group;seen[group]=true end
+        if not seenGroups[group]then groups[#groups+1]=group;seenGroups[group]=true end
     end
-    return out
+    local saved={}
+    for entry,key in pairs(keys)do if savedKeys[key]then saved[entry]=true end end
+    lists["收藏"]=favorites
+    searchCache={source=favorites,count=#favorites,lists=lists,groups=groups,saved=saved}
+    return searchCache
 end
+-- Read-only views, shared until invalidated. The second result marks favorites
+-- by original entry identity, so visible rows never rescan the saved list.
+function A.SearchEntries(group)
+    local directory=searchDirectory()
+    return directory.lists[group or false] or emptySearchEntries,directory.saved
+end
+function A.Categories()return searchDirectory().groups end
 function A.Number(value)
     if issecretvalue and issecretvalue(value) then return nil end
     if type(value)~="number" or value~=value or value==math.huge or value==-math.huge then return nil end
@@ -157,3 +182,5 @@ function A.DB()
     return d
 end
 function A.Plan() return A.DB().plans[A.DB().selectedPlan] end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("AuctionHouseData.lua") end

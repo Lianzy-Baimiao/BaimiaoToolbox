@@ -168,3 +168,5 @@ function A.SetPurchaseSource(source)
     if A.purchaseSource~=source then A.Stop(T["点击开始补货查询材料价格"]);A.purchaseSource=source end
     return true
 end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("AuctionHouseRecipes.lua") end

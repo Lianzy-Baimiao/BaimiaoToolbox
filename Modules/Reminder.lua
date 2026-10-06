@@ -47,6 +47,10 @@ local function DB() return ns.GetDB(MODULE_ID, defaults) end
 local function LayoutDB() return ns.GetLayoutDB(MODULE_ID, DB()) end
 
 local playerClass  -- 登录时缓存，本会话不变
+local lastReliableMissing = false
+local auraSnapshotValid = false
+local watchedInstances, instanceIDsKnown
+local spellLists = {} -- two bounded entries; replaced when the matching setting changes
 
 --------------------------------------------------------------------------------
 -- 判定
@@ -59,6 +63,22 @@ local function ParseSpells(str)
         ids[#ids + 1] = tonumber(token)
     end
     return ids
+end
+
+-- Configuration parsing is not event work. Never retain every edited string.
+local function SpellList(kind, source)
+    source = tostring(source or "")
+    local cached = spellLists[kind]
+    if not cached or cached.source ~= source then
+        local ids, lookup = ParseSpells(source), {}
+        for _, id in ipairs(ids) do lookup[id] = true end
+        cached = { source = source, ids = ids, lookup = lookup }
+        spellLists[kind] = cached
+        if kind == "aura" then
+            lastReliableMissing, auraSnapshotValid = false, false
+        end
+    end
+    return cached.ids, cached.lookup
 end
 
 -- 当前专精的 specID（猎人：253 兽王 / 254 射击 / 255 生存）。取不到返回 nil。
@@ -95,7 +115,7 @@ local SPEC_MARKSMANSHIP = 254
 -- 是否拥有“独来独往”（不带宠物是正常玩法）。
 local function HasLoneWolf()
     if playerClass ~= "HUNTER" then return false end
-    for _, id in ipairs(ParseSpells(DB().rules.pet.loneWolfSpells or DEFAULT_LONE_WOLF)) do
+    for _, id in ipairs(SpellList("pet", DB().rules.pet.loneWolfSpells or DEFAULT_LONE_WOLF)) do
         if IsPlayerSpell and IsPlayerSpell(id) then return true end
         if IsSpellKnown and IsSpellKnown(id) then return true end
     end
@@ -117,28 +137,50 @@ local function MissingPet()
     return not UnitExists("pet")
 end
 
--- 扫描玩家身上所有增益，返回 spellId 集合 + 是否成功。
--- 12.x 里增益枚举（GetAuraSlots/ForEachAura）在被 taint 时会抛“secret”错，
--- 所以整段 pcall，失败就返回 ok=false（只给 /remind auras 诊断用）。
-local function ScanPlayerBuffs()
-    local set = {}
-    local ok = pcall(function()
+-- Secret values must not be compared, indexed, or used as branch conditions.
+local function IsSecret(value)
+    return issecretvalue and issecretvalue(value)
+end
+local function PublicID(value)
+    return not IsSecret(value) and type(value) == "number" and value > 0
+end
+
+-- The slash diagnostic still needs all spell IDs. Runtime scans also retain only
+-- watched instance IDs, so unrelated removals can be skipped without a full cache.
+local function ScanPlayerBuffs(watched)
+    local set, instances = {}, watched and {} or nil
+    local instanceIDsKnown, readable = true, true
+    local ok, available = pcall(function()
+        local function visit(...)
+            local data = ...
+            if IsSecret(data) then readable = false; return false end
+            local packed = type(data) == "table"
+            local spellID
+            if packed then spellID = data.spellId else spellID = select(10, ...) end
+            if not PublicID(spellID) then readable = false; return false end
+            set[spellID] = true
+            if watched and watched[spellID] then
+                local instanceID = packed and data.auraInstanceID
+                if PublicID(instanceID) then instances[instanceID] = true
+                else instanceIDsKnown = false end
+            end
+            return false
+        end
         if AuraUtil and AuraUtil.ForEachAura then
-            AuraUtil.ForEachAura("player", "HELPFUL", nil, function(...)
-                local data = ...
-                local spellId = type(data) == "table" and data.spellId or select(10, ...)
-                if spellId then set[spellId] = true end
-                return false
-            end, true)
+            AuraUtil.ForEachAura("player", "HELPFUL", nil, visit, true)
         elseif C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
             for i = 1, 40 do
                 local data = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
+                if IsSecret(data) then readable = false; break end
                 if not data then break end
-                if data.spellId then set[data.spellId] = true end
+                visit(data)
             end
+        else
+            return false -- no API is unknown, not an empty buff list
         end
+        return true
     end)
-    return set, ok
+    return set, ok and available and readable, instances, instanceIDsKnown
 end
 
 -- 骑士当前是否没有开任何配置里的光环。
@@ -150,24 +192,25 @@ end
 -- 解决：战斗中【不重新判断】，沿用最近一次“脱战且成功读到”的可靠结果。
 -- 缓存只在【脱战 + 枚举可信】时写入，绝不从战斗中的不可信读取写入
 -- （之前卡死就是因为拿不可信读取写了缓存）。初值 false，未知时不提醒。
-local lastReliableMissing = false
-
 local function MissingPaladinAura()
     if playerClass ~= "PALADIN" then return false end
-    local ids = ParseSpells(DB().rules.paladinAura.spells)
+    local ids, watched = SpellList("aura", DB().rules.paladinAura.spells)
     if #ids == 0 then return false end
 
     -- 读不可信的窗口：战斗中，或大秘境进行中（钥石一开始整局光环都对插件隐身）。
     -- 这些情况下沿用最近一次可靠判断，不重新读。
     local inChallenge = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
         and C_ChallengeMode.IsChallengeModeActive()
-    if InCombatLockdown() or UnitAffectingCombat("player") or inChallenge then
+    auraSnapshotValid = false
+    if IsSecret(inChallenge) or InCombatLockdown() or UnitAffectingCombat("player") or inChallenge then
         return lastReliableMissing
     end
 
-    local buffs, ok = ScanPlayerBuffs()
+    local buffs, ok, instances, known = ScanPlayerBuffs(watched)
     if not ok then return lastReliableMissing end  -- 脱战但仍读不到：沿用上次
 
+    watchedInstances, instanceIDsKnown = instances, known
+    auraSnapshotValid = true
     for _, id in ipairs(ids) do
         if buffs[id] then lastReliableMissing = false; return false end
     end
@@ -175,17 +218,48 @@ local function MissingPaladinAura()
     return true
 end
 
--- 汇总当前需要提醒的文本行。
-local function CollectMessages()
+-- Class rules are mutually exclusive; no temporary message table is needed.
+local function CurrentMessage()
     local r = DB().rules
-    local out = {}
-    if r.pet.enabled and MissingPet() then
-        out[#out + 1] = r.pet.text
+    if r.pet.enabled and MissingPet() then return r.pet.text end
+    if r.paladinAura.enabled and MissingPaladinAura() then return r.paladinAura.text end
+end
+
+-- Only skip a public delta after a trustworthy snapshot. Unknown fields, failed
+-- lookups and older clients fall back to the same safe full-read path as before.
+local function AuraDeltaIsIrrelevant(info)
+    if not auraSnapshotValid or IsSecret(info) or type(info) ~= "table" then return false end
+    if IsSecret(info.isFullUpdate) or info.isFullUpdate ~= false then return false end
+    local _, watched = SpellList("aura", DB().rules.paladinAura.spells)
+    if not auraSnapshotValid then return false end -- configuration changed
+    local added, updated, removed = info.addedAuras, info.updatedAuraInstanceIDs, info.removedAuraInstanceIDs
+    if IsSecret(added) or IsSecret(updated) or IsSecret(removed) then return false end
+    if added ~= nil then
+        if type(added) ~= "table" then return false end
+        for _, data in ipairs(added) do
+            if IsSecret(data) or type(data) ~= "table" then return false end
+            local id = data.spellId
+            if not PublicID(id) or watched[id] then return false end
+        end
     end
-    if r.paladinAura.enabled and MissingPaladinAura() then
-        out[#out + 1] = r.paladinAura.text
+    if removed ~= nil then
+        if type(removed) ~= "table" then return false end
+        for _, id in ipairs(removed) do
+            if not PublicID(id) or not instanceIDsKnown or watchedInstances[id] then return false end
+        end
     end
-    return out
+    if updated ~= nil then
+        if type(updated) ~= "table" then return false end
+        for _, id in ipairs(updated) do
+            if not PublicID(id) or watchedInstances[id] then return false end
+            if not C_UnitAuras or not C_UnitAuras.GetAuraDataByAuraInstanceID then return false end
+            local data = C_UnitAuras.GetAuraDataByAuraInstanceID("player", id)
+            if IsSecret(data) or type(data) ~= "table" then return false end
+            local spellID = data.spellId
+            if not PublicID(spellID) or watched[spellID] then return false end
+        end
+    end
+    return true
 end
 
 --------------------------------------------------------------------------------
@@ -194,6 +268,8 @@ end
 
 local frame
 local testUntil = 0  -- “测试”时强制显示到某时间点
+local SyncEvents
+local renderedText, renderedFont, renderedSize, renderedFlags
 
 local function ApplyLook()
     if not frame then return end
@@ -217,29 +293,40 @@ local function StopPulse()
     end
 end
 
+local function ShowMessage(text)
+    local font, size, flags = frame.text:GetFont()
+    local textChanged = renderedText ~= text
+    if textChanged then frame.text:SetText(text); renderedText = text end
+    if textChanged or font ~= renderedFont or size ~= renderedSize or flags ~= renderedFlags then
+        renderedFont, renderedSize, renderedFlags = font, size, flags
+        local width = math.max(frame.text:GetStringWidth() + 40, 120)
+        local height = math.max(frame.text:GetStringHeight() + 20, 40)
+        if frame:GetWidth() ~= width or frame:GetHeight() ~= height then frame:SetSize(width, height) end
+    end
+    if not frame:IsShown() then frame:Show() end
+end
+
+local function HideMessage()
+    if frame:IsShown() then frame:Hide() end
+    StopPulse()
+end
+
 local function Update()
     if not frame then return end
+    if not ns.IsModuleEnabled(MODULE_ID) then HideMessage(); return end
     local d = DB()
 
     -- 解锁状态：始终显示一个占位，方便拖动摆位。
     if not frame:IsLocked() then
-        frame.text:SetText(T["◆ 提示器（拖动我）◆"])
-        frame:Show()
+        ShowMessage(T["◆ 提示器（拖动我）◆"])
         StopPulse()
-        frame:SetSize(math.max(frame.text:GetStringWidth() + 40, 120),
-                       math.max(frame.text:GetStringHeight() + 20, 40))
         return
     end
 
-    if not ns.IsModuleEnabled(MODULE_ID) then frame:Hide() StopPulse() return end
-
     -- 测试：强制显示示例文本一小段时间。
     if GetTime() < testUntil then
-        frame.text:SetText(T["|cffff2020提示示例|r"])
-        frame:Show()
+        ShowMessage(T["|cffff2020提示示例|r"])
         if d.pulse then StartPulse() else StopPulse() end
-        frame:SetSize(math.max(frame.text:GetStringWidth() + 40, 120),
-                       math.max(frame.text:GetStringHeight() + 20, 40))
         return
     end
 
@@ -251,16 +338,9 @@ local function Update()
         frame:Hide() StopPulse() return
     end
 
-    local msgs = CollectMessages()
-    if #msgs == 0 then
-        frame:Hide() StopPulse()
-        return
-    end
-
-    frame.text:SetText(table.concat(msgs, "\n"))
-    frame:SetSize(math.max(frame.text:GetStringWidth() + 40, 120),
-                   math.max(frame.text:GetStringHeight() + 20, 40))
-    frame:Show()
+    local text = CurrentMessage()
+    if text == nil then HideMessage(); return end
+    ShowMessage(text)
     if d.pulse then StartPulse() else StopPulse() end
 end
 
@@ -305,6 +385,8 @@ end
 
 local function Refresh()
     if not frame then return end
+    auraSnapshotValid = false
+    if SyncEvents then SyncEvents() end
     frame:ApplyPosition()
     ApplyLook()
     frame:ApplyLockVisual()
@@ -318,45 +400,75 @@ end
 local eventFrame
 local pollActive = false
 
-local function RegisterAllEvents()
+SyncEvents = function()
+    if not eventFrame then return end
+    eventFrame:UnregisterAllEvents()
+    pollActive = ns.IsModuleEnabled(MODULE_ID)
+    if not pollActive then return end
+    local rules = DB().rules
+    local pet = (playerClass == "HUNTER" or playerClass == "WARLOCK") and rules.pet.enabled
+    local aura = playerClass == "PALADIN" and rules.paladinAura.enabled
+        and #SpellList("aura", rules.paladinAura.spells) > 0
+    if not pet and not aura then return end
+
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    eventFrame:RegisterUnitEvent("UNIT_PET", "player")
-    eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
-    eventFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
-    eventFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     eventFrame:RegisterEvent("PLAYER_DEAD")
     eventFrame:RegisterEvent("PLAYER_ALIVE")
     eventFrame:RegisterEvent("PLAYER_UNGHOST")
-    eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-    pollActive = true
+    if pet then
+        eventFrame:RegisterUnitEvent("UNIT_PET", "player")
+        eventFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+        eventFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+        if playerClass == "HUNTER" then
+            eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+            eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+            eventFrame:RegisterEvent("SPELLS_CHANGED")
+        end
+    end
+    if aura then
+        eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
+        eventFrame:RegisterEvent("CHALLENGE_MODE_START")
+        eventFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+        eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
+    end
+end
+
+local function OnEvent(_, event, unit, info)
+    if event == "PLAYER_SPECIALIZATION_CHANGED" and unit ~= "player" then return end
+    if event == "UNIT_AURA" then
+        local ok, irrelevant = pcall(AuraDeltaIsIrrelevant, info)
+        if ok and irrelevant then return end
+    end
+    -- Invalidate even while hidden/dead/in preview: the next usable read must
+    -- not filter against a snapshot from before that state transition.
+    auraSnapshotValid = false
+    Update()
 end
 
 local function SetupEvents()
-    if eventFrame then
-        -- 已存在：说明是被重新启用，补注册一次即可（UnregisterAllEvents 摘光了）。
-        RegisterAllEvents()
-        return
+    if not eventFrame then
+        eventFrame = CreateFrame("Frame")
+        eventFrame:SetScript("OnEvent", OnEvent)
+        if ns.PerfWatchFrame then ns.PerfWatchFrame("Reminder", eventFrame, "OnEvent") end
+        -- Keep the existing visible-only 0.5s fallback and preview expiry. This
+        -- optimization removes redundant work, not update responsiveness.
+        local acc = 0
+        frame:SetScript("OnUpdate", function(_, dt)
+            if not pollActive then return end
+            acc = acc + dt
+            if acc >= 0.5 then acc = 0 Update() end
+        end)
+        if ns.PerfWatchFrame then ns.PerfWatchFrame("Reminder", frame, "OnUpdate") end
     end
-    eventFrame = CreateFrame("Frame")
-    RegisterAllEvents()
-    eventFrame:SetScript("OnEvent", function() Update() end)
-
-    -- 事件之外再挂个 0.5s 轮询兜底：有些光环/宠物变化不一定触发上面的事件，
-    -- 靠轮询保证脱战、切光环后也能及时刷新。
-    pollActive = true
-    local acc = 0
-    frame:SetScript("OnUpdate", function(_, dt)
-        if not pollActive then return end
-        acc = acc + dt
-        if acc >= 0.5 then acc = 0 Update() end
-    end)
+    SyncEvents()
 end
 
 -- 模块被总开关关闭时：摘掉事件、停轮询，避免空转。
 local function TeardownEvents()
     pollActive = false
+    auraSnapshotValid = false
     if eventFrame then eventFrame:UnregisterAllEvents() end
 end
 
@@ -498,12 +610,10 @@ ns.RegisterModule({
         TeardownEvents()
         if frame then frame:Hide() StopPulse() end
     end,
-    OnToggle = function(_, on)
-        if on and eventFrame then
-            -- 重新注册事件（OnDisable 已摘光）。
-            SetupEvents()
-        end
-        Refresh()
+    OnToggle = function()
+        Refresh() -- reconciles subscriptions once, including re-enable
     end,
     BuildOptions = BuildOptions,
 })
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("Reminder.lua") end

@@ -253,3 +253,7 @@ ns.RegisterModule({id=ID,name=T["小工具集合"],desc=T["右键邀请与复制
     BuildOptions=BuildOptions,OnEnable=start,
     OnDisable=stop,
     OnToggle=function(_,on) if on then start() end end})
+
+if ns.PerfWatchFrame then ns.PerfWatchFrame("SmallTools", events, "OnEvent") end
+
+if ns.StartupCheckpoint then ns.StartupCheckpoint("MarkerAssist + SmallToolsExtras + SmallTools.lua") end
