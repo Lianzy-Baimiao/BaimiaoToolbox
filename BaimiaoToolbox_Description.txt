@@ -43,11 +43,11 @@ Feature settings are account-wide; frame positions and lock settings are saved p
 
 Install the addon for your **Retail** game instance. For manual installation, place the **BaimiaoToolbox** folder in `World of Warcraft/_retail_/Interface/AddOns/`, with `BaimiaoToolbox.toc` directly inside it.
 
-When upgrading to **1.9.20**, fully exit the game before installation and restart it afterward. Keep your SavedVariables; no full settings reset is required. Existing spell-sequence cooldown settings switch off once on upgrade; you can re-enable them afterward, and your later choice is preserved.
+When upgrading to **1.9.21**, fully exit the game before installation and restart it afterward. This release adds the Retail 12.1.5 Interface tag `120105` without changing feature logic or introducing another settings migration. Keep your SavedVariables. When upgrading from a version older than 1.9.20, the existing one-time spell-sequence cooldown migration still applies; subsequent manual choices are preserved.
 
 ## Compatibility and limits
 
-- Retail only, not Classic or Classic Era. Use the supported game versions listed on the download page.
+- Retail only, not Classic or Classic Era. Includes the Retail 12.1.5 Interface tag `120105`; retain in-game verification for live client behavior. Use the supported game versions listed on the download page.
 - No external addon is required. LibSharedMedia-3.0 integration is optional and is not bundled. A private, modified LibDeflate component is included for party-keystone messages and does not register as a shared library.
 - Missing or API-restricted information is not fabricated. An unknown party keystone does not mean the player has no key.
 - Protected actions, combat restrictions, and group permissions still apply. Queue invitations are not accepted automatically.
@@ -118,11 +118,11 @@ Settings pages load on demand, with reorganized groups and clearer save behavior
 
 请安装到**正式服**客户端。手动安装时，将 **BaimiaoToolbox** 文件夹放入 `World of Warcraft/_retail_/Interface/AddOns/`，确保 `BaimiaoToolbox.toc` 直接位于该文件夹内。
 
-升级到 **1.9.20** 时，请完全退出游戏后安装，再重新进入。保留 SavedVariables，无需清空设置；已有循环冷却配置仅在升级时关闭一次，之后可手动重新开启并保存选择。
+升级到 **1.9.21** 时，请完全退出游戏后安装，再重新进入。本次增加正式服 12.1.5 的 Interface 标记 `120105`，不改动功能逻辑、不增加配置迁移；保留 SavedVariables，无需清空设置。从早于 1.9.20 的版本升级时，仍沿用原有的循环冷却一次性迁移，之后的手动选择会保留。
 
 ### 兼容性与限制
 
-- 仅面向正式服，不支持怀旧服；具体游戏版本以下载页面标记为准。
+- 仅面向正式服，不支持怀旧服；已加入正式服 12.1.5 的 Interface 标记 `120105`，实机行为仍需游戏内验证，具体游戏版本以下载页面标记为准。
 - 无需必装的外部插件。LibSharedMedia-3.0 为可选集成，未内嵌该库；队友钥石通信使用内嵌的私有修改版 LibDeflate，不注册为共享库。
 - 不伪造未获取或被 API 限制的数据；“待同步”不代表队友没有钥石。
 - 受保护操作、战斗限制和队伍权限仍然有效；不会自动接受队列邀请。

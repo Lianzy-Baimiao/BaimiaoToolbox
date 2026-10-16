@@ -1,3 +1,25 @@
+## 1.9.21 — 2026-10-15
+
+## English
+### Retail 12.1.5 metadata update
+- Added Interface tag `120105` for Retail 12.1.5 while retaining existing tags.
+- No gameplay or UI logic changes from 1.9.20. Existing settings, modules, localization, and cooldown opt-in behavior are unchanged; no new settings migration is introduced.
+- Fully exit and restart the game after installation. Keep SavedVariables; do not reset your settings.
+- 1,154 offline regression tests and 27 runtime Lua 5.1 syntax checks passed. Live 12.1.5 client behavior still requires in-game verification; the Interface tag alone is not a full compatibility guarantee.
+- The ZIP contains runtime files, the existing icon, and licenses only. No audio, tests, private captures, or publishing documents are bundled.
+
+---
+
+## 中文
+### 正式服 12.1.5 版本声明更新
+- 新增正式服 12.1.5 的 Interface 标记 `120105`，保留已有版本标记。
+- 相比 1.9.20 不改动功能或界面逻辑；现有配置、模块、语言及冷却手动开启机制保持不变，不增加配置迁移。
+- 安装后请完全退出并重启游戏；保留 SavedVariables，无需重置设置。
+- 1154 项离线回归测试及 27 个运行文件的 Lua 5.1 语法检查通过。12.1.5 实机行为仍需游戏内验证，版本标记不等同于所有功能已完成实测。
+- ZIP 仅包含运行文件、原有图标和许可证，不包含音频、测试、私人采集或发布文档。
+
+---
+
 ## 1.9.20 — 2026-10-07
 
 ## English
