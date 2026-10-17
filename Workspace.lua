@@ -113,8 +113,9 @@ local descriptions = {
     mythicplus=T["副本成绩、记录与手动传送。"],
     smalltools=T["右键操作、进本与排队提醒、交易回执。"],
     auctionhouse=T["快捷搜索、清单与追踪配方补货。"],
+    soundmute=T["坐骑、组队提示与自定义音效。"],
 }
-local icons={135802,132261,135940,136012,135959,525134,133742,133784}
+local icons={135802,132261,135940,136012,135959,525134,133742,133784,"Interface\\Icons\\ability_priest_silence"}
 local function combatMessage()
     if InCombatLockdown() then
         ns.Print(T["战斗中暂不修改工具箱配置；请脱战后再试。"])
@@ -369,6 +370,8 @@ function UI.BuildWorkspace()
         local m=workspace.currentModule
         if not m or combatMessage() then return end
         ns.SetModuleEnabled(m.id,not ns.IsModuleEnabled(m.id));refresh()
+        -- Status lines on the open page may depend on the module switch.
+        if m._syncLayout then m._syncLayout:SyncAll() end
     end);workspace.toggle:SetPoint("TOPRIGHT",-24,-74);workspace.toggle:SetHeight(28)
     workspace.content=CreateFrame("Frame",nil,workspace)
     workspace.content:SetPoint("TOPLEFT",208,-112);workspace.content:SetPoint("BOTTOMRIGHT",-24,16)

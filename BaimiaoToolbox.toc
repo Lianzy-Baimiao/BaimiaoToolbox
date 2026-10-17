@@ -11,7 +11,7 @@
 ## SavedVariables: BaimiaoToolboxDB
 ## SavedVariablesPerCharacter: BaimiaoToolboxDBPC
 ## OptionalDeps: LibSharedMedia-3.0
-## Version: 1.9.21
+## Version: 1.9.22
 ## IconTexture: Interface\AddOns\BaimiaoToolbox\media\cat_icon.tga
 
 StartupDiagnostics.lua
@@ -47,6 +47,9 @@ Modules\AuctionHouseData.lua
 Modules\AuctionHouseRecipes.lua
 Modules\AuctionHouse.lua
 Modules\AuctionHouseUI.lua
+
+Modules\SoundMuteData.lua
+Modules\SoundMute.lua
 
 DiagnosticsUIReplay.lua
 Diagnostics.lua

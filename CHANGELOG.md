@@ -1,3 +1,43 @@
+## 1.9.22 — 2026-10-18
+
+## English
+### New: Sound Mute
+- New module, opt-in: nothing is muted until you check an entry. Uses the client's MuteSoundFile API and only ever unmutes sounds it muted itself, so other mute addons keep their lists.
+- Mount summon sounds: one checkbox for 540 sound files across 74 mount models, including skyriding drakes, mechsuits and Paladin chargers.
+- Continuous mount sounds: moving, hovering and idle loops for 47 mount models with dedicated sound folders. Sounds shared with NPCs or dungeon bosses are left out, so encounter cues keep playing.
+- Party invite / member joined chime (also used by duel and channel invites): mute always, while recruiting (whether or not you lead), while you lead, or for 2 minutes after you invite someone, which covers inviting directly while solo.
+- Custom sounds: add up to 200 FileDataIDs, each with its own checkbox.
+- A speaker icon previews every entry. A muted sound is released for one playback and muted again afterwards; mount list previews name the mount. Checked sounds are muted again at every login.
+
+### Workspace
+- The header enable/disable button now refreshes the open settings page immediately.
+
+### Installation and validation
+- This release adds new files: fully exit the game, replace the addon folder, then restart. Keep SavedVariables; no settings reset is needed.
+- 1,166 offline regression tests and Lua 5.1 syntax checks for all 29 runtime files passed. Sound Mute still needs live-client verification of muting, previews and each invite path; the mount lists are generated from game data and may miss mounts whose sounds are shared with other creatures.
+- The ZIP contains runtime files, the existing icon, and licenses only. No audio, tests, private captures, or publishing documents are bundled.
+
+---
+
+## 中文
+### 新增：音效屏蔽
+- 新模块，默认不屏蔽任何音效，勾选后才生效。使用客户端 MuteSoundFile 接口，只解除本模块自己屏蔽的音效，其他静音插件的列表不受影响。
+- 坐骑召唤音效：一个勾选项覆盖 74 种坐骑造型、540 个音效文件，包括驭空术幼龙、机甲和圣骑士战马。
+- 坐骑持续音效：移动、悬停与待机循环音，覆盖 47 种有专属音效目录的坐骑；与 NPC 或地下城首领共用的音效不收录，首领施法提示照常播放。
+- 组队邀请 / 进组提示音（与决斗、频道邀请共用）：可选始终屏蔽、正在招募时（不论是否队长）、我是队长时，或我邀请别人后 2 分钟内，单人直接组人也有效。
+- 自定义音效：最多添加 200 个音效 ID，每个单独勾选。
+- 每项都有小喇叭试听；已屏蔽的音效试听时临时放开一次，播完重新屏蔽，坐骑清单试听会显示对应坐骑。已勾选的音效每次登录自动重新屏蔽。
+
+### 工作台
+- 在工作台顶栏启用或停用模块后，当前设置页立即刷新。
+
+### 安装与验证
+- 本次新增文件：请完全退出游戏后覆盖插件文件夹，再重新启动；保留 SavedVariables，无需重置设置。
+- 1166 项离线回归测试及 29 个运行文件的 Lua 5.1 语法检查通过。音效屏蔽的实机静音、试听及各类邀请方式仍需游戏内验证；坐骑清单由游戏数据生成，与其他生物共用音效的坐骑可能未收录。
+- ZIP 仅包含运行文件、原有图标和许可证，不包含音频、测试、私人采集或发布文档。
+
+---
+
 ## 1.9.21 — 2026-10-15
 
 ## English

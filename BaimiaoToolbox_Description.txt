@@ -24,6 +24,12 @@ A modular utility addon for World of Warcraft Retail. Keep useful shortcuts, rem
 - **Party keystones:** Show shared keys from current party members. Supports LibKeystone, Keystone Group List, AngryKeystones, and LibOpenRaid-compatible messages, plus actual keystone links shared by party members. Availability depends on the sender's addon and supported message channel; the addon cannot inspect another player's bags.
 - **Marker assistant:** Target markers, world markers, ready checks, and native group countdowns, subject to game permissions.
 
+## Sound mute
+
+- **Mount sounds:** One checkbox mutes summon sounds for 74 mount models; another mutes moving, hovering and idle loops for 47 mounts with their own sound files, such as Mimiron's Head. Sounds shared with NPCs or dungeon bosses are left alone.
+- **Party invite / member joined chime:** The same sound plays for duel and channel invites. Mute it always, while recruiting (whether or not you lead), while you lead, or for 2 minutes after you invite someone.
+- **Custom sounds and previews:** Add your own sound IDs. Every entry has a speaker icon to preview it, and nothing is muted until you check it. Only sounds the addon muted itself are ever unmuted, so other mute addons keep their lists.
+
 ## Auction House companion
 
 - **Quick search:** 86 built-in presets across 11 visible categories, including profession missives, plus your own favorites. Search by name, item link, or item ID. Localized, color-coded stat labels help identify flasks, potions, gems, enchants, and missives.
@@ -43,7 +49,7 @@ Feature settings are account-wide; frame positions and lock settings are saved p
 
 Install the addon for your **Retail** game instance. For manual installation, place the **BaimiaoToolbox** folder in `World of Warcraft/_retail_/Interface/AddOns/`, with `BaimiaoToolbox.toc` directly inside it.
 
-When upgrading to **1.9.21**, fully exit the game before installation and restart it afterward. This release adds the Retail 12.1.5 Interface tag `120105` without changing feature logic or introducing another settings migration. Keep your SavedVariables. When upgrading from a version older than 1.9.20, the existing one-time spell-sequence cooldown migration still applies; subsequent manual choices are preserved.
+When upgrading to **1.9.22**, fully exit the game before installation and restart it afterward; this release adds new files. The new Sound Mute module starts with nothing muted. Keep your SavedVariables. When upgrading from a version older than 1.9.20, the existing one-time spell-sequence cooldown migration still applies; subsequent manual choices are preserved.
 
 ## Compatibility and limits
 
@@ -99,6 +105,12 @@ Settings pages load on demand, with reorganized groups and clearer save behavior
 - **队友钥石：**展示当前小队成员分享的钥石，支持 LibKeystone、Keystone Group List、AngryKeystones 与 LibOpenRaid 兼容消息，以及队友发送的真实钥石链接。是否能获取取决于对方插件和消息频道，不会直接读取其他玩家的背包。
 - **标记助手：**目标标记、地面标记、就位确认和原生团队倒数，遵守游戏权限限制。
 
+### 音效屏蔽
+
+- **坐骑音效：**一个勾选项屏蔽 74 种坐骑造型的召唤音效；另一个屏蔽 47 种有专属音效坐骑的移动、悬停与待机循环音，例如米米尔隆的头部。与 NPC 或地下城首领共用的音效不处理。
+- **组队邀请 / 进组提示音：**与决斗、频道邀请共用同一音效。可选始终屏蔽、正在招募时（不论是否队长）、我是队长时，或我邀请别人后 2 分钟内。
+- **自定义音效与试听：**可添加自己的音效 ID，每项都有小喇叭试听；不勾选就不屏蔽。只解除插件自己屏蔽的音效，其他静音插件的列表不受影响。
+
 ### 拍卖行助手
 
 - **快捷搜索：**86 项内置预设、11 个直接可见的分类，包含公函；个人收藏独立管理，支持名称、链接和物品 ID 搜索。合剂、药水、宝石、附魔与公函显示彩色属性简写。
@@ -118,7 +130,7 @@ Settings pages load on demand, with reorganized groups and clearer save behavior
 
 请安装到**正式服**客户端。手动安装时，将 **BaimiaoToolbox** 文件夹放入 `World of Warcraft/_retail_/Interface/AddOns/`，确保 `BaimiaoToolbox.toc` 直接位于该文件夹内。
 
-升级到 **1.9.21** 时，请完全退出游戏后安装，再重新进入。本次增加正式服 12.1.5 的 Interface 标记 `120105`，不改动功能逻辑、不增加配置迁移；保留 SavedVariables，无需清空设置。从早于 1.9.20 的版本升级时，仍沿用原有的循环冷却一次性迁移，之后的手动选择会保留。
+升级到 **1.9.22** 时，请完全退出游戏后安装，再重新进入；本次新增了文件。新的音效屏蔽模块默认不屏蔽任何音效；保留 SavedVariables，无需清空设置。从早于 1.9.20 的版本升级时，仍沿用原有的循环冷却一次性迁移，之后的手动选择会保留。
 
 ### 兼容性与限制
 
